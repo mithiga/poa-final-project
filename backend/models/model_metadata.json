@@ -1,0 +1,227 @@
+{
+  "EURUSD": {
+    "models": {
+      "ARIMA": {
+        "name": "ARIMA",
+        "filename": "ARIMA_EURUSD.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "arima",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:05:01"
+      },
+      "LSTM": {
+        "name": "LSTM",
+        "filename": "LSTM_EURUSD_data.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "lstm",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:05:17"
+      },
+      "Prophet": {
+        "name": "Prophet",
+        "filename": "PROPHET_EURUSD.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "prophet",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:13:16"
+      },
+      "SARIMA": {
+        "name": "SARIMA",
+        "filename": "SARIMA_EURUSD.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "sarima",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:05:02"
+      },
+      "GRU": {
+        "name": "GRU",
+        "filename": "GRU_EURUSD_data.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "gru",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:06:13"
+      },
+      "LightGBM": {
+        "name": "LightGBM",
+        "filename": "LightGBM_EURUSD.txt",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "lightgbm",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:13:17"
+      },
+      "LinearRegression": {
+        "name": "LinearRegression",
+        "filename": "LinearRegression_EURUSD.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "regression",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:13:17"
+      },
+      "RandomForest": {
+        "name": "RandomForest",
+        "filename": "RandomForest_EURUSD.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "random_forest",
+        "data_symbol": "EURUSD=X",
+        "last_model_update": "2026-03-16 01:13:21"
+      }
+    },
+    "data_info": {
+      "symbol": "EURUSD=X",
+      "description": "EURUSD Currency Pair",
+      "training_period_start": "2020-12-10",
+      "training_period_end": "2026-02-27",
+      "prediction_valid_from": "2026-02-27"
+    },
+    "last_update": "2026-03-16 01:13:21"
+  },
+  "NZDUSD": {
+    "models": {
+      "ARIMA": {
+        "name": "ARIMA",
+        "filename": "ARIMA_NZDUSD.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "arima",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:24:37"
+      },
+      "SARIMA": {
+        "name": "SARIMA",
+        "filename": "SARIMA_NZDUSD.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "sarima",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:24:38"
+      },
+      "LSTM": {
+        "name": "LSTM",
+        "filename": "LSTM_NZDUSD_data.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "lstm",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:24:43"
+      },
+      "GRU": {
+        "name": "GRU",
+        "filename": "GRU_NZDUSD_data.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "gru",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:25:02"
+      },
+      "Prophet": {
+        "name": "Prophet",
+        "filename": "PROPHET_NZDUSD.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "prophet",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:26:50"
+      },
+      "LightGBM": {
+        "name": "LightGBM",
+        "filename": "LightGBM_NZDUSD.txt",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "lightgbm",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:26:50"
+      },
+      "LinearRegression": {
+        "name": "LinearRegression",
+        "filename": "LinearRegression_NZDUSD.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "regression",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:26:50"
+      },
+      "RandomForest": {
+        "name": "RandomForest",
+        "filename": "RandomForest_NZDUSD.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "random_forest",
+        "data_symbol": "NZDUSD=X",
+        "last_model_update": "2026-03-15 16:26:53"
+      }
+    },
+    "data_info": {
+      "symbol": "NZDUSD=X",
+      "description": "NZDUSD Currency Pair"
+    },
+    "last_update": "2026-03-15 16:26:53"
+  },
+  "GCF": {
+    "models": {
+      "ARIMA": {
+        "name": "ARIMA",
+        "filename": "ARIMA_GCF.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "arima",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-16 00:04:01"
+      },
+      "SARIMA": {
+        "name": "SARIMA",
+        "filename": "SARIMA_GCF.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "sarima",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-15 16:59:47"
+      },
+      "LSTM": {
+        "name": "LSTM",
+        "filename": "LSTM_GCF_data.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "lstm",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-16 00:21:39"
+      },
+      "GRU": {
+        "name": "GRU",
+        "filename": "GRU_GCF_data.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "gru",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-16 00:13:23"
+      },
+      "Prophet": {
+        "name": "Prophet",
+        "filename": "PROPHET_GCF.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "prophet",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-15 17:03:13"
+      },
+      "LightGBM": {
+        "name": "LightGBM",
+        "filename": "LightGBM_GCF.txt",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "lightgbm",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-15 17:03:13"
+      },
+      "LinearRegression": {
+        "name": "LinearRegression",
+        "filename": "LinearRegression_GCF.pkl",
+        "training_cutoff_date": "2026-03-10",
+        "model_type": "regression",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-15 20:14:14"
+      },
+      "RandomForest": {
+        "name": "RandomForest",
+        "filename": "RandomForest_GCF.pkl",
+        "training_cutoff_date": "2026-02-09",
+        "model_type": "random_forest",
+        "data_symbol": "GC=F",
+        "last_model_update": "2026-03-15 17:03:16"
+      }
+    },
+    "data_info": {
+      "symbol": "GC=F",
+      "description": "GCF Currency Pair",
+      "training_period_start": "2025-04-15",
+      "training_period_end": "2026-02-27",
+      "prediction_valid_from": "2026-02-27"
+    },
+    "last_update": "2026-03-16 00:21:39"
+  }
+}

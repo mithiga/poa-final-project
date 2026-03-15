@@ -1,0 +1,14 @@
+.venv/
+venv/
+frontend/venv/
+.vscode/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.streamlit/secrets.toml
+.DS_Store
+Thumbs.db

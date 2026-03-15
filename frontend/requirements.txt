@@ -1,0 +1,13 @@
+# UI Framework
+streamlit>=1.31.0
+streamlit-extras>=0.3.0
+
+# Communication
+requests>=2.31.0
+
+# Visualization
+plotly>=5.18.0
+pandas>=2.2.0
+
+# Utilities
+watchdog>=4.0.0
