@@ -173,23 +173,53 @@ def get_theme_css(T: dict) -> str:
         opacity: 1 !important;
     }}
 
+    /* ── Select trigger text and placeholder ── */
+    [data-baseweb="select"] [data-testid="stMarkdownContainer"],
+    [data-baseweb="select"] span,
+    [data-baseweb="select"] div {{
+        color: {T['text_primary']} !important;
+    }}
+
     /* ── Dropdown option list ── */
     [data-baseweb="popover"] ul,
-    [data-baseweb="menu"] {{
+    [data-baseweb="menu"],
+    [role="listbox"] {{
         background: {T['table_bg']} !important;
         border: 1px solid {T['card_border']} !important;
     }}
     [data-baseweb="menu"] li,
-    [data-baseweb="option"] {{
+    [data-baseweb="option"],
+    [role="option"] {{
         color: {T['text_primary']} !important;
         background: {T['table_bg']} !important;
     }}
-    [data-baseweb="option"]:hover {{
-        background: {T['tab_bg']} !important;
-    }}
-    [data-baseweb="option"][aria-selected="true"] {{
-        background: {T['accent']} !important;
+    [data-baseweb="popover"] div,
+    [data-baseweb="menu"] div,
+    [data-baseweb="option"] span,
+    [role="option"] span {{
         color: {T['text_primary']} !important;
+    }}
+    [data-baseweb="option"]:hover,
+    [role="option"]:hover {{
+        background: {T['accent3']} !important;
+        color: #ffffff !important;
+    }}
+    [data-baseweb="option"][aria-selected="true"],
+    [role="option"][aria-selected="true"] {{
+        background: {T['accent']} !important;
+        color: #ffffff !important;
+    }}
+    [data-baseweb="menu"] div[aria-live="polite"],
+    [data-baseweb="menu"] [role="status"] {{
+        color: {T['text_secondary']} !important;
+    }}
+
+    /* ── Multiselect selected chips/tags ── */
+    [data-baseweb="tag"],
+    [data-baseweb="tag"] span {{
+        background: {T['accent2']} !important;
+        color: #ffffff !important;
+        border-color: {T['accent']} !important;
     }}
 
     /* ── Native HTML select/option styling (handles some Streamlit widgets) ── */

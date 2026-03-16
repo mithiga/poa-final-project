@@ -6,6 +6,8 @@ import streamlit as st
 import requests
 import plotly.graph_objects as go
 import pandas as pd
+import threading
+import time
 from datetime import datetime, timedelta
 
 
@@ -33,6 +35,223 @@ def _cached_hyperparameters(api_base_url: str, model: str):
     except Exception:
         pass
     return []
+
+
+def _model_metrics_df(evaluation: dict) -> pd.DataFrame:
+    rows = []
+    for model_name, metrics in (evaluation or {}).items():
+        if not isinstance(metrics, dict):
+            continue
+        param_source = metrics.get("parameter_source", "default")
+        rows.append({
+            "Model": model_name,
+            "RMSE": f"{metrics.get('rmse', 'N/A'):.4f}" if isinstance(metrics.get("rmse"), (int, float)) else "N/A",
+            "MAE": f"{metrics.get('mae', 'N/A'):.4f}" if isinstance(metrics.get("mae"), (int, float)) else "N/A",
+            "MAPE": f"{metrics.get('mape', 'N/A'):.2f}%" if isinstance(metrics.get("mape"), (int, float)) else "N/A",
+            "Params": "Saved Best CV" if param_source == "saved_best_cv" else "Default",
+            "Status": metrics.get("status", "unknown"),
+        })
+    return pd.DataFrame(rows)
+
+
+def _aggregate_model_summary(by_ticker: dict) -> pd.DataFrame:
+    aggregate = {}
+    for payload in (by_ticker or {}).values():
+        evaluation = payload.get("evaluation", {}) if isinstance(payload, dict) else {}
+        for model_name, metrics in evaluation.items():
+            if not isinstance(metrics, dict):
+                continue
+            entry = aggregate.setdefault(
+                model_name,
+                {"count": 0, "rmse": 0.0, "mae": 0.0, "mape": 0.0},
+            )
+            if isinstance(metrics.get("rmse"), (int, float)):
+                entry["rmse"] += float(metrics["rmse"])
+            if isinstance(metrics.get("mae"), (int, float)):
+                entry["mae"] += float(metrics["mae"])
+            if isinstance(metrics.get("mape"), (int, float)):
+                entry["mape"] += float(metrics["mape"])
+            entry["count"] += 1
+
+    rows = []
+    for model_name, stats in aggregate.items():
+        count = stats["count"]
+        if count <= 0:
+            continue
+        rows.append({
+            "Model": model_name,
+            "Runs": count,
+            "Avg RMSE": f"{(stats['rmse'] / count):.4f}",
+            "Avg MAE": f"{(stats['mae'] / count):.4f}",
+            "Avg MAPE": f"{(stats['mape'] / count):.2f}%",
+        })
+    return pd.DataFrame(rows)
+
+
+def _ticker_training_summary_df(by_ticker: dict) -> pd.DataFrame:
+    rows = []
+    for ticker_name, payload in (by_ticker or {}).items():
+        if not isinstance(payload, dict):
+            continue
+
+        evaluation = payload.get("evaluation", {})
+        successes = 0
+        failures = 0
+        best_model = "N/A"
+        best_rmse = None
+
+        if isinstance(evaluation, dict):
+            for model_name, metrics in evaluation.items():
+                if not isinstance(metrics, dict):
+                    continue
+                if metrics.get("status") == "success":
+                    successes += 1
+                    rmse_value = metrics.get("rmse")
+                    if isinstance(rmse_value, (int, float)) and (best_rmse is None or rmse_value < best_rmse):
+                        best_rmse = float(rmse_value)
+                        best_model = model_name
+                else:
+                    failures += 1
+
+        rows.append({
+            "Ticker": ticker_name,
+            "Status": payload.get("status", "unknown"),
+            "Model Success": successes,
+            "Model Failed": failures,
+            "Best Model": best_model,
+            "Best RMSE": f"{best_rmse:.4f}" if isinstance(best_rmse, float) else "N/A",
+            "Error": payload.get("error", ""),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def _post_with_live_progress(url: str, payload: dict, timeout: int, stages: list[str], phase_seconds: int = 20):
+    """Run a POST request in a worker thread and stream stage/progress updates in UI."""
+    status_box = st.empty()
+    progress_box = st.empty()
+
+    state = {"done": False, "response": None, "error": None}
+
+    def _worker():
+        try:
+            state["response"] = requests.post(url, json=payload, timeout=timeout)
+        except Exception as exc:
+            state["error"] = exc
+        finally:
+            state["done"] = True
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    start_ts = time.time()
+    stage_count = max(1, len(stages))
+    while not state["done"]:
+        elapsed = time.time() - start_ts
+        stage_idx = min(int(elapsed // max(1, phase_seconds)), stage_count - 1)
+        current_stage = stages[stage_idx] if stages else "Processing request"
+
+        expected_total = stage_count * max(1, phase_seconds)
+        pct = min(95, max(5, int((elapsed / expected_total) * 100)))
+
+        status_box.info(f"{current_stage} ({int(elapsed)}s elapsed)")
+        progress_box.progress(pct, text=f"Training progress: {pct}%")
+        time.sleep(0.35)
+
+    if state["error"] is not None:
+        progress_box.empty()
+        status_box.empty()
+        raise state["error"]
+
+    final_elapsed = int(time.time() - start_ts)
+    progress_box.progress(100, text="Training progress: 100%")
+    status_box.success(f"Training completed in {final_elapsed}s")
+    return state["response"]
+
+
+def _start_async_training_job(job_key: str, url: str, payload: dict, timeout: int,
+                              stages: list[str], phase_seconds: int = 20):
+    """Start a background POST job unless one is already active for the given key."""
+    existing = st.session_state.get(job_key)
+    if existing and isinstance(existing, dict):
+        thread = existing.get("thread")
+        if thread and thread.is_alive():
+            return False
+
+    state = {
+        "done": False,
+        "response": None,
+        "error": None,
+        "start_ts": time.time(),
+        "stages": stages or ["Processing request"],
+        "phase_seconds": max(1, int(phase_seconds)),
+        "cancel_requested": False,
+        "thread": None,
+    }
+
+    def _worker():
+        try:
+            state["response"] = requests.post(url, json=payload, timeout=timeout)
+        except Exception as exc:
+            state["error"] = exc
+        finally:
+            state["done"] = True
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    state["thread"] = thread
+    st.session_state[job_key] = state
+    thread.start()
+    return True
+
+
+def _poll_async_training_job(job_key: str, cancel_label: str):
+    """Render async job status. Returns response when complete and not canceled."""
+    state = st.session_state.get(job_key)
+    if not state or not isinstance(state, dict):
+        return None
+
+    done = bool(state.get("done"))
+    cancel_requested = bool(state.get("cancel_requested"))
+    elapsed = time.time() - float(state.get("start_ts", time.time()))
+    stages = state.get("stages", ["Processing request"])
+    phase_seconds = int(state.get("phase_seconds", 20))
+
+    if not done:
+        stage_idx = min(int(elapsed // max(1, phase_seconds)), max(0, len(stages) - 1))
+        current_stage = stages[stage_idx] if stages else "Processing request"
+        expected_total = max(1, len(stages)) * max(1, phase_seconds)
+        pct = min(95, max(5, int((elapsed / expected_total) * 100)))
+
+        st.progress(pct, text=f"Training progress: {pct}%")
+        if cancel_requested:
+            st.warning("Cancel requested. Waiting for current backend step to finish...")
+        else:
+            st.info(f"{current_stage} ({int(elapsed)}s elapsed)")
+
+        if st.button(cancel_label, key=f"{job_key}_cancel_btn", use_container_width=True):
+            state["cancel_requested"] = True
+            st.session_state[job_key] = state
+
+        time.sleep(0.4)
+        st.rerun()
+
+    # Job finished
+    st.progress(100, text="Training progress: 100%")
+
+    if cancel_requested:
+        st.warning("Training canceled in UI. The backend request may have continued server-side.")
+        st.session_state.pop(job_key, None)
+        return None
+
+    if state.get("error") is not None:
+        st.error(f"Training request failed: {state['error']}")
+        st.session_state.pop(job_key, None)
+        return None
+
+    st.success(f"Training completed in {int(elapsed)}s")
+    response = state.get("response")
+    st.session_state.pop(job_key, None)
+    return response
 
 
 def render_training_page(T, API_BASE_URL):
@@ -296,23 +515,40 @@ def render_training_page(T, API_BASE_URL):
                         "train_size": train_size
                     }
                     
-                    with st.spinner(f"Training {model} model for {pair}..."):
-                        try:
-                            res = requests.post(f"{API_BASE_URL}/train", json=payload, timeout=300)
-                            
-                            if res.status_code == 200:
-                                data = res.json()
-                                st.success(f"✅ {data.get('message', 'Training completed')}")
-                                
-                                mcol1, mcol2, mcol3 = st.columns(3)
-                                mcol1.metric("RMSE", f"{data.get('rmse', 'N/A')}")
-                                mcol2.metric("MAE", f"{data.get('mae', 'N/A')}")
-                                mcol3.metric("MAPE", f"{data.get('mape', 'N/A')}")
-                            else:
-                                st.error(f"❌ Training failed: {res.text}")
-                        except Exception as e:
-                            st.error(f"❌ Error: {str(e)}")
-                else:
+                    started = _start_async_training_job(
+                        job_key="train_single_async_job",
+                        url=f"{API_BASE_URL}/train",
+                        payload=payload,
+                        timeout=300,
+                        stages=[
+                            "Validating training request",
+                            "Fetching market data",
+                            "Training model",
+                            "Evaluating metrics",
+                            "Saving artifacts",
+                        ],
+                        phase_seconds=10,
+                    )
+                    if not started:
+                        st.info("A Train Single run is already in progress.")
+
+                res = _poll_async_training_job(
+                    job_key="train_single_async_job",
+                    cancel_label="Stop waiting and cancel this run (best effort)",
+                )
+
+                if res is not None:
+                    if res.status_code == 200:
+                        data = res.json()
+                        st.success(f"✅ {data.get('message', 'Training completed')}")
+
+                        mcol1, mcol2, mcol3 = st.columns(3)
+                        mcol1.metric("RMSE", f"{data.get('rmse', 'N/A')}")
+                        mcol2.metric("MAE", f"{data.get('mae', 'N/A')}")
+                        mcol3.metric("MAPE", f"{data.get('mape', 'N/A')}")
+                    else:
+                        st.error(f"❌ Training failed: {res.text}")
+                elif "train_single_async_job" not in st.session_state:
                     st.markdown(f"""
                     <div style='text-align:center; padding:50px 20px; color:{T['text_secondary']};'>
                         <p style='font-size:3rem; margin-bottom:10px;'>🎓</p>
@@ -331,12 +567,13 @@ def render_training_page(T, API_BASE_URL):
         
         with col1:
             st.markdown(f"<h4 style='color:{T['subheading_color']};'>📋 Training Parameters</h4>", unsafe_allow_html=True)
-            
-            pair = st.selectbox(
-                "Currency Pair",
-                list(PAIR_TO_TICKER.keys()),
-                key="train_all_pair"
-            )
+
+            train_all_pair_options = ["ALL (All Supported Tickers)"] + list(PAIR_TO_TICKER.keys())
+            pair = st.selectbox("Currency Pair", train_all_pair_options, key="train_all_pair")
+
+            selected_ticker = "ALL" if pair.startswith("ALL") else PAIR_TO_TICKER.get(pair, "EURUSD=X")
+            if selected_ticker == "ALL":
+                st.info("This will train all available models across all supported tickers. This can take several minutes.")
             
             # Show available models
             models = [m for m in _cached_available_models(API_BASE_URL) if m != "SARIMA"]
@@ -372,44 +609,103 @@ def render_training_page(T, API_BASE_URL):
             
             with results_container:
                 if train_all_btn:
-                    ticker = PAIR_TO_TICKER.get(pair, "EURUSD=X")
+                    all_mode = selected_ticker == "ALL"
                     payload = {
-                        "ticker": ticker,
+                        "ticker": selected_ticker,
                         "start_date": start_date.strftime("%Y-%m-%d"),
                         "end_date": end_date.strftime("%Y-%m-%d"),
-                        "train_size": train_size
+                        "train_size": train_size,
                     }
-                    
-                    with st.spinner(f"Training all {len(models)} models for {pair}..."):
-                        try:
-                            res = requests.post(f"{API_BASE_URL}/train_all", json=payload, timeout=600)
-                            
-                            if res.status_code == 200:
-                                data = res.json()
-                                st.success(f"✅ All models trained successfully!")
-                                
-                                if "evaluation" in data:
-                                    eval_data = data["evaluation"]
-                                    metrics_list = []
-                                    for model_name, metrics in eval_data.items():
-                                        if isinstance(metrics, dict):
-                                            param_source = metrics.get("parameter_source", "default")
-                                            metrics_list.append({
-                                                "Model": model_name,
-                                                "RMSE": f"{metrics.get('rmse', 'N/A'):.4f}" if isinstance(metrics.get('rmse'), (int, float)) else "N/A",
-                                                "MAE": f"{metrics.get('mae', 'N/A'):.4f}" if isinstance(metrics.get('mae'), (int, float)) else "N/A",
-                                                "MAPE": f"{metrics.get('mape', 'N/A'):.2f}%" if isinstance(metrics.get('mape'), (int, float)) else "N/A",
-                                                "Params": "Saved Best CV" if param_source == "saved_best_cv" else "Default",
-                                            })
-                                    
-                                    if metrics_list:
-                                        df = pd.DataFrame(metrics_list)
-                                        st.dataframe(df, use_container_width=True, hide_index=True)
+
+                    started = _start_async_training_job(
+                        job_key="train_all_async_job",
+                        url=f"{API_BASE_URL}/train_all",
+                        payload=payload,
+                        timeout=1200 if all_mode else 600,
+                        stages=(
+                            [
+                                "Preparing multi-ticker training plan",
+                                "Downloading data windows for all tickers",
+                                "Training baseline models across tickers",
+                                "Running full-data retraining pass",
+                                "Collecting per-ticker model metrics",
+                                "Writing model artifacts and metadata",
+                            ]
+                            if all_mode
+                            else [
+                                "Validating train-all request",
+                                "Fetching data",
+                                "Training all models",
+                                "Evaluating model metrics",
+                                "Saving artifacts",
+                            ]
+                        ),
+                        phase_seconds=25 if all_mode else 14,
+                    )
+                    if not started:
+                        st.info("A Train All run is already in progress.")
+
+                res = _poll_async_training_job(
+                    job_key="train_all_async_job",
+                    cancel_label="Stop waiting and cancel this run (best effort)",
+                )
+
+                if res is not None:
+                    if res.status_code == 200:
+                        data = res.json()
+
+                        by_ticker = data.get("by_ticker") if isinstance(data, dict) else None
+                        if isinstance(by_ticker, dict) and by_ticker:
+                            summary = data.get("summary", {}) if isinstance(data.get("summary"), dict) else {}
+                            total_tickers = int(summary.get("total_tickers", len(by_ticker)))
+                            succeeded = int(summary.get("succeeded", 0))
+                            failed = int(summary.get("failed", max(0, total_tickers - succeeded)))
+
+                            if failed == 0:
+                                st.success("✅ Train All completed for all supported tickers.")
                             else:
-                                st.error(f"❌ Training failed: {res.text}")
-                        except Exception as e:
-                            st.error(f"❌ Error: {str(e)}")
-                else:
+                                st.warning(f"⚠️ Train All completed with partial failures ({failed}/{total_tickers} tickers failed).")
+
+                            kcol1, kcol2, kcol3 = st.columns(3)
+                            kcol1.metric("Tickers", total_tickers)
+                            kcol2.metric("Succeeded", succeeded)
+                            kcol3.metric("Failed", failed)
+
+                            ticker_df = _ticker_training_summary_df(by_ticker)
+                            if not ticker_df.empty:
+                                ordered_cols = ["Ticker", "Status", "Model Success", "Model Failed", "Best Model", "Best RMSE", "Error"]
+                                st.dataframe(ticker_df[ordered_cols], use_container_width=True, hide_index=True)
+
+                            aggregate_df = _aggregate_model_summary(by_ticker)
+                            if not aggregate_df.empty:
+                                st.markdown("**Model Averages Across Tickers**")
+                                st.dataframe(aggregate_df, use_container_width=True, hide_index=True)
+
+                            with st.expander("Per-Ticker Model Metrics"):
+                                ticker_choices = sorted(by_ticker.keys())
+                                selected_detail_ticker = st.selectbox(
+                                    "Select ticker",
+                                    ticker_choices,
+                                    key="train_all_detail_ticker",
+                                )
+                                detail_eval = by_ticker.get(selected_detail_ticker, {}).get("evaluation", {})
+                                detail_df = _model_metrics_df(detail_eval)
+                                if detail_df.empty:
+                                    st.info("No model metrics available for this ticker.")
+                                else:
+                                    display_cols = ["Model", "Status", "RMSE", "MAE", "MAPE", "Params"]
+                                    st.dataframe(detail_df[display_cols], use_container_width=True, hide_index=True)
+                        else:
+                            st.success("✅ All models trained successfully!")
+                            eval_df = _model_metrics_df(data.get("evaluation", {}))
+                            if not eval_df.empty:
+                                display_cols = ["Model", "Status", "RMSE", "MAE", "MAPE", "Params"]
+                                st.dataframe(eval_df[display_cols], use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Training completed, but no evaluation metrics were returned.")
+                    else:
+                        st.error(f"❌ Training failed: {res.text}")
+                elif "train_all_async_job" not in st.session_state:
                     st.markdown(f"""
                     <div style='text-align:center; padding:50px 20px; color:{T['text_secondary']};'>
                         <p style='font-size:3rem; margin-bottom:10px;'>🚀</p>
@@ -510,7 +806,8 @@ def render_training_page(T, API_BASE_URL):
                 # Train button
                 col_btn1, col_btn2 = st.columns([3, 1])
                 with col_btn1:
-                    if st.button("🚀 Train with Tuned Parameters", use_container_width=True, key="train_tuned_btn"):
+                    train_tuned_btn = st.button("🚀 Train with Tuned Parameters", use_container_width=True, key="train_tuned_btn")
+                    if train_tuned_btn:
                         ticker = PAIR_TO_TICKER.get(hp_pair, "EURUSD=X")
                         
                         payload = {
@@ -521,21 +818,44 @@ def render_training_page(T, API_BASE_URL):
                             "train_size": 0.8,
                             "hyperparameters": hp_values
                         }
-                        
-                        with st.spinner(f"Training {hp_model} with custom hyperparameters..."):
-                            try:
-                                train_response = requests.post(f"{API_BASE_URL}/train_with_tuning", json=payload, timeout=120)
-                                if train_response.status_code == 200:
-                                    result = train_response.json()
-                                    st.success(f"✅ Training Complete! RMSE: {result.get('rmse', 'N/A'):.4f}, MAE: {result.get('mae', 'N/A'):.4f}")
-                                else:
-                                    st.error(f"Training failed: {train_response.text}")
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
+
+                        started = _start_async_training_job(
+                            job_key="train_tuned_async_job",
+                            url=f"{API_BASE_URL}/train_with_tuning",
+                            payload=payload,
+                            timeout=180,
+                            stages=[
+                                "Validating tuned training request",
+                                "Fetching market data",
+                                "Applying custom hyperparameters",
+                                "Training tuned model",
+                                "Evaluating and saving artifacts",
+                            ],
+                            phase_seconds=10,
+                        )
+                        if not started:
+                            st.info("A tuned training run is already in progress.")
                 
                 with col_btn2:
                     if st.button("🔄 Reset", use_container_width=True, key="reset_hp_btn"):
+                        st.session_state.pop("train_tuned_async_job", None)
                         st.rerun()
+
+                tuned_res = _poll_async_training_job(
+                    job_key="train_tuned_async_job",
+                    cancel_label="Stop waiting and cancel tuned run (best effort)",
+                )
+                if tuned_res is not None:
+                    if tuned_res.status_code == 200:
+                        result = tuned_res.json()
+                        rmse_val = result.get("rmse")
+                        mae_val = result.get("mae")
+                        if isinstance(rmse_val, (int, float)) and isinstance(mae_val, (int, float)):
+                            st.success(f"✅ Training Complete! RMSE: {rmse_val:.4f}, MAE: {mae_val:.4f}")
+                        else:
+                            st.success("✅ Training Complete!")
+                    else:
+                        st.error(f"Training failed: {tuned_res.text}")
         
             else:
                 st.warning(f"Could not load hyperparameters for {hp_model}")

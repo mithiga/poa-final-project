@@ -205,10 +205,35 @@ def _handle_get(path: str, params: Dict[str, Any]) -> EmbeddedResponse:
     if path == "/all_hyperparameters":
         return _json_response(200, get_all_hyperparameters())
 
+    if path == "/train_all_async/status":
+        job_id = params.get("job_id")
+        if not job_id:
+            return _json_response(400, {"detail": "job_id is required"})
+        state = TrainingService.get_train_all_job(str(job_id))
+        if not state:
+            return _json_response(404, {"detail": "Job not found"})
+        return _json_response(200, state)
+
     return _json_response(404, {"detail": f"Unknown endpoint: {path}"})
 
 
 def _handle_post(path: str, json_body: Dict[str, Any]) -> EmbeddedResponse:
+    if path == "/train_all_async/cancel":
+        job_id = json_body.get("job_id")
+        if not job_id:
+            return _json_response(400, {"detail": "job_id is required"})
+        state = TrainingService.cancel_train_all_job(str(job_id))
+        if not state:
+            return _json_response(404, {"detail": "Job not found"})
+        return _json_response(
+            200,
+            {
+                "job_id": str(job_id),
+                "status": state.get("status"),
+                "cancel_requested": bool(state.get("cancel_requested", False)),
+            },
+        )
+
     if path == "/predict":
         request = PredictionRequest(**json_body)
         dates, predictions, metrics = ForecastService.get_predictions(
@@ -234,7 +259,21 @@ def _handle_post(path: str, json_body: Dict[str, Any]) -> EmbeddedResponse:
             start_date=request.start_date,
             end_date=request.end_date,
             train_size=request.train_size,
+            force_retrain=request.force_retrain,
         )
+
+        if isinstance(result, dict) and result.get("skipped"):
+            payload = TrainResponse(
+                ticker=request.ticker,
+                model=request.model,
+                rmse=0.0,
+                mae=0.0,
+                mape=0.0,
+                status="Skipped",
+                message=result.get("message", f"{request.model} skipped for {request.ticker}"),
+            ).model_dump()
+            return _json_response(200, payload)
+
         payload = TrainResponse(
             ticker=request.ticker,
             model=request.model,
@@ -253,13 +292,27 @@ def _handle_post(path: str, json_body: Dict[str, Any]) -> EmbeddedResponse:
             start_date=request.start_date,
             end_date=request.end_date,
             train_size=request.train_size,
+            force_retrain=request.force_retrain,
         )
         payload = TrainAllResponse(
             ticker=request.ticker,
             evaluation=results["evaluation"],
             training=results["training"],
+            by_ticker=results.get("by_ticker"),
+            summary=results.get("summary"),
             status="Success",
         ).model_dump()
+        return _json_response(200, payload)
+
+    if path == "/train_all_async/start":
+        request = TrainAllRequest(**json_body)
+        payload = TrainingService.start_train_all_job(
+            ticker=request.ticker,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            train_size=request.train_size,
+            force_retrain=request.force_retrain,
+        )
         return _json_response(200, payload)
 
     if path == "/train_with_tuning":
