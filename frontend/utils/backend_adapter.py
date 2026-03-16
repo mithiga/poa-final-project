@@ -26,21 +26,91 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
-from apis.pydantic_models import (  # noqa: E402
-    HyperparameterTuningRequest,
-    HyperparameterTuningResponse,
-    ModelHyperparameters,
-    PredictionRequest,
-    PredictionResponse,
-    SUPPORTED_MODELS,
-    SystemStatusResponse,
-    TrainAllRequest,
-    TrainAllResponse,
-    TrainRequest,
-    TrainResponse,
-)
-from apis.services import ForecastService, MarketDataService, SystemService, TrainingService  # noqa: E402
-from apis.ml_pipeline import get_all_hyperparameters, get_model_hyperparameters, load_model_metadata  # noqa: E402
+_BACKEND_LOADED = False
+_BACKEND_IMPORT_ERROR: Optional[Exception] = None
+
+# These names are populated by _ensure_backend_loaded() to avoid import-time crashes
+# on environments where embedded backend imports fail.
+HyperparameterTuningRequest = None
+HyperparameterTuningResponse = None
+ModelHyperparameters = None
+PredictionRequest = None
+PredictionResponse = None
+SUPPORTED_MODELS = []
+SystemStatusResponse = None
+TrainAllRequest = None
+TrainAllResponse = None
+TrainRequest = None
+TrainResponse = None
+ForecastService = None
+MarketDataService = None
+SystemService = None
+TrainingService = None
+get_all_hyperparameters = None
+get_model_hyperparameters = None
+load_model_metadata = None
+
+
+def _ensure_backend_loaded() -> bool:
+    """Lazily import backend dependencies used for embedded mode."""
+    global _BACKEND_LOADED, _BACKEND_IMPORT_ERROR
+    global HyperparameterTuningRequest, HyperparameterTuningResponse, ModelHyperparameters
+    global PredictionRequest, PredictionResponse, SUPPORTED_MODELS, SystemStatusResponse
+    global TrainAllRequest, TrainAllResponse, TrainRequest, TrainResponse
+    global ForecastService, MarketDataService, SystemService, TrainingService
+    global get_all_hyperparameters, get_model_hyperparameters, load_model_metadata
+
+    if _BACKEND_LOADED:
+        return True
+    if _BACKEND_IMPORT_ERROR is not None:
+        return False
+
+    try:
+        from apis.pydantic_models import (  # type: ignore
+            HyperparameterTuningRequest as _HyperparameterTuningRequest,
+            HyperparameterTuningResponse as _HyperparameterTuningResponse,
+            ModelHyperparameters as _ModelHyperparameters,
+            PredictionRequest as _PredictionRequest,
+            PredictionResponse as _PredictionResponse,
+            SUPPORTED_MODELS as _SUPPORTED_MODELS,
+            SystemStatusResponse as _SystemStatusResponse,
+            TrainAllRequest as _TrainAllRequest,
+            TrainAllResponse as _TrainAllResponse,
+            TrainRequest as _TrainRequest,
+            TrainResponse as _TrainResponse,
+        )
+        from apis.services import ForecastService as _ForecastService  # type: ignore
+        from apis.services import MarketDataService as _MarketDataService  # type: ignore
+        from apis.services import SystemService as _SystemService  # type: ignore
+        from apis.services import TrainingService as _TrainingService  # type: ignore
+        from apis.ml_pipeline import get_all_hyperparameters as _get_all_hyperparameters  # type: ignore
+        from apis.ml_pipeline import get_model_hyperparameters as _get_model_hyperparameters  # type: ignore
+        from apis.ml_pipeline import load_model_metadata as _load_model_metadata  # type: ignore
+
+        HyperparameterTuningRequest = _HyperparameterTuningRequest
+        HyperparameterTuningResponse = _HyperparameterTuningResponse
+        ModelHyperparameters = _ModelHyperparameters
+        PredictionRequest = _PredictionRequest
+        PredictionResponse = _PredictionResponse
+        SUPPORTED_MODELS = _SUPPORTED_MODELS
+        SystemStatusResponse = _SystemStatusResponse
+        TrainAllRequest = _TrainAllRequest
+        TrainAllResponse = _TrainAllResponse
+        TrainRequest = _TrainRequest
+        TrainResponse = _TrainResponse
+        ForecastService = _ForecastService
+        MarketDataService = _MarketDataService
+        SystemService = _SystemService
+        TrainingService = _TrainingService
+        get_all_hyperparameters = _get_all_hyperparameters
+        get_model_hyperparameters = _get_model_hyperparameters
+        load_model_metadata = _load_model_metadata
+
+        _BACKEND_LOADED = True
+        return True
+    except Exception as exc:
+        _BACKEND_IMPORT_ERROR = exc
+        return False
 
 
 class EmbeddedResponse:
@@ -71,7 +141,9 @@ def configure_backend(default_base_url: str = "http://localhost:8000") -> tuple[
         return api_base_url, "remote"
 
     install_requests_adapter(api_base_url)
-    return api_base_url, "embedded"
+    if _ensure_backend_loaded():
+        return api_base_url, "embedded"
+    return api_base_url, "embedded-unavailable"
 
 
 def install_requests_adapter(api_base_url: str) -> None:
@@ -148,6 +220,9 @@ def dispatch_request(method: str, url: str, params: Optional[Dict[str, Any]] = N
 
 
 def _handle_get(path: str, params: Dict[str, Any]) -> EmbeddedResponse:
+    if not _ensure_backend_loaded():
+        return _json_response(500, {"detail": f"Embedded backend unavailable: {_BACKEND_IMPORT_ERROR}"})
+
     if path == "/status":
         payload = SystemStatusResponse(**SystemService.get_status()).model_dump()
         return _json_response(200, payload)
@@ -218,6 +293,9 @@ def _handle_get(path: str, params: Dict[str, Any]) -> EmbeddedResponse:
 
 
 def _handle_post(path: str, json_body: Dict[str, Any]) -> EmbeddedResponse:
+    if not _ensure_backend_loaded():
+        return _json_response(500, {"detail": f"Embedded backend unavailable: {_BACKEND_IMPORT_ERROR}"})
+
     if path == "/train_all_async/cancel":
         job_id = json_body.get("job_id")
         if not job_id:
@@ -345,6 +423,14 @@ def _handle_post(path: str, json_body: Dict[str, Any]) -> EmbeddedResponse:
 
 
 def _get_model_cutoff_date(ticker: str, model: str) -> Dict[str, Any]:
+    if not _ensure_backend_loaded():
+        return {
+            "ticker": ticker,
+            "model": model,
+            "cutoff_date": None,
+            "error": f"Embedded backend unavailable: {_BACKEND_IMPORT_ERROR}",
+        }
+
     metadata = load_model_metadata()
     ticker_symbol = ticker.replace("=X", "").replace("=", "").replace("/", "")
 
