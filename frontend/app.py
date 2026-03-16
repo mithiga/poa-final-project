@@ -4,6 +4,10 @@ ForexAI Pro - Minimal frontend shell with sidebar navigation and page routing.
 
 import requests
 import streamlit as st
+try:
+    from streamlit_option_menu import option_menu
+except Exception:
+    option_menu = None
 
 from utils.backend_adapter import configure_backend
 from utils.runtime_cache import runtime_safe_cache_data
@@ -84,14 +88,56 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    page_key = st.radio(
-        "Navigation",
-        PAGE_OPTIONS,
-        index=PAGE_OPTIONS.index(st.session_state.get("main_nav", PAGE_OPTIONS[0])),
-        format_func=lambda value: PAGE_LABELS.get(value, value),
-        key="main_nav",
-        label_visibility="collapsed",
-    )
+    current_page = st.session_state.get("main_nav", PAGE_OPTIONS[0])
+    default_index = PAGE_OPTIONS.index(current_page)
+
+    if option_menu is not None:
+        display_options = [PAGE_LABELS.get(key, key) for key in PAGE_OPTIONS]
+        selected_display = option_menu(
+            menu_title=None,
+            options=display_options,
+            icons=["graph-up-arrow", "cpu", "activity", "info-circle"],
+            default_index=default_index,
+            styles={
+                "container": {
+                    "padding": "6px",
+                    "background-color": T["table_bg"],
+                    "border": f"1px solid {T['card_border']}",
+                    "border-radius": "12px",
+                },
+                "icon": {
+                    "color": T["text_secondary"],
+                    "font-size": "1rem",
+                },
+                "nav-link": {
+                    "font-size": "0.9rem",
+                    "text-align": "left",
+                    "margin": "4px 0",
+                    "padding": "10px 12px",
+                    "border-radius": "8px",
+                    "color": T["text_primary"],
+                    "border": "1px solid transparent",
+                    "--hover-color": T["alert_bg"],
+                },
+                "nav-link-selected": {
+                    "background-color": T["accent2"],
+                    "color": "white",
+                    "font-weight": "600",
+                    "border": f"1px solid {T['accent']}",
+                },
+            },
+        )
+        page_key = PAGE_OPTIONS[display_options.index(selected_display)]
+        st.session_state["main_nav"] = page_key
+    else:
+        page_key = st.selectbox(
+            "Navigation",
+            PAGE_OPTIONS,
+            index=default_index,
+            format_func=lambda value: PAGE_LABELS.get(value, value),
+            key="main_nav",
+            label_visibility="collapsed",
+        )
 
     st.query_params["page"] = page_key
 
