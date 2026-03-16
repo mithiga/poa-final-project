@@ -45,6 +45,12 @@ PAGE_LABELS = {
     "about": "ℹ️ About Project",
 }
 
+page_from_query = params.get("page")
+if page_from_query in PAGE_OPTIONS:
+    st.session_state["main_nav"] = page_from_query
+elif "main_nav" not in st.session_state:
+    st.session_state["main_nav"] = PAGE_OPTIONS[0]
+
 with st.sidebar:
     st.markdown(
         f"<h2 style='color:{T['accent']}; margin-bottom:0;'>📈 ForexAI Pro</h2>"
@@ -81,10 +87,13 @@ with st.sidebar:
     page_key = st.radio(
         "Navigation",
         PAGE_OPTIONS,
-        index=0,
+        index=PAGE_OPTIONS.index(st.session_state.get("main_nav", PAGE_OPTIONS[0])),
         format_func=lambda value: PAGE_LABELS.get(value, value),
+        key="main_nav",
         label_visibility="collapsed",
     )
+
+    st.query_params["page"] = page_key
 
     if page_key == "about":
         st.markdown("<div class='about-badge'>Project architecture and release status</div>", unsafe_allow_html=True)
