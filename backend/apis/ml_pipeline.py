@@ -8,6 +8,7 @@ for ARIMA, SARIMAX, LSTM, GRU, Prophet, LightGBM, LinearRegression, and RandomFo
 import os
 import json
 import joblib
+import shutil
 from datetime import datetime
 from typing import Optional
 
@@ -270,6 +271,81 @@ def _to_prophet_df(data: pd.DataFrame) -> pd.DataFrame:
 # Base directory for model storage (relative to backend root)
 MODELS_BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
 MODEL_PARAMETERS_PATH = os.path.join(MODELS_BASE_DIR, "model_parameters.json")
+
+
+def _atomic_joblib_dump(payload, destination_path: str) -> None:
+    """Write a joblib artifact atomically to avoid partial/corrupt files."""
+    directory = os.path.dirname(destination_path)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = os.path.join(
+        directory,
+        f".{os.path.basename(destination_path)}.tmp.{os.getpid()}"
+    )
+    try:
+        joblib.dump(payload, temp_path)
+        os.replace(temp_path, destination_path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _save_validated_lightgbm_model(booster: lgb.Booster, destination_path: str) -> None:
+    """
+    Save LightGBM model atomically and validate the saved file before promotion.
+
+    A previous known-good model is retained as `<model>.lastgood` for fallback.
+    """
+    directory = os.path.dirname(destination_path)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = os.path.join(
+        directory,
+        f".{os.path.basename(destination_path)}.tmp.{os.getpid()}"
+    )
+    backup_path = f"{destination_path}.lastgood"
+
+    try:
+        booster.save_model(temp_path)
+
+        # Validate that the just-saved artifact is readable and non-empty.
+        validated = lgb.Booster(model_file=temp_path)
+        if validated.num_trees() <= 0:
+            raise RuntimeError("Validated LightGBM model has zero trees.")
+
+        if os.path.exists(destination_path):
+            shutil.copy2(destination_path, backup_path)
+
+        os.replace(temp_path, destination_path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _load_validated_lightgbm_model(destination_path: str) -> lgb.Booster:
+    """Load LightGBM model with fallback to last known-good backup."""
+    candidates = [destination_path, f"{destination_path}.lastgood"]
+    failures = []
+
+    for candidate in candidates:
+        if not os.path.exists(candidate):
+            continue
+        try:
+            booster = lgb.Booster(model_file=candidate)
+            if booster.num_trees() <= 0:
+                raise RuntimeError("Model has zero trees.")
+            return booster
+        except Exception as exc:
+            failures.append(f"{candidate}: {exc}")
+
+    details = " | ".join(failures) if failures else "No model files found."
+    raise RuntimeError(
+        f"Unable to load a valid LightGBM model for path '{destination_path}'. {details}"
+    )
 
 
 def _canonical_model_name(model_name: str) -> str:
@@ -790,10 +866,10 @@ def lightgbm_model(train: pd.DataFrame, test: Optional[pd.DataFrame], ticker: st
         rmse = mae = mape = float("nan")
 
     lgbm_filename = f"LightGBM_{ticker_symbol}.txt"
-    model.booster_.save_model(os.path.join(ticker_folder, lgbm_filename))
+    _save_validated_lightgbm_model(model.booster_, os.path.join(ticker_folder, lgbm_filename))
 
     data_filename = f"LightGBM_{ticker_symbol}_data.pkl"
-    joblib.dump({
+    _atomic_joblib_dump({
         "feature_cols": feature_cols,
         "last_features": X_train.iloc[-1].values,
         "train_data": train[feature_cols + ["Close"]].values
@@ -1719,9 +1795,9 @@ def _train_lightgbm_with_hp(train, test, ticker, hp, final_fit: bool = False):
         rmse = mae = mape = float("nan")
 
     lgbm_filename = f"LightGBM_{ticker_symbol}.txt"
-    model.booster_.save_model(os.path.join(ticker_folder, lgbm_filename))
+    _save_validated_lightgbm_model(model.booster_, os.path.join(ticker_folder, lgbm_filename))
     data_filename = f"LightGBM_{ticker_symbol}_data.pkl"
-    joblib.dump({
+    _atomic_joblib_dump({
         "feature_cols": feature_cols,
         "last_features": X_train.iloc[-1].values,
         "train_data": train_ready[feature_cols + ["Close"]].values
@@ -1994,7 +2070,8 @@ def generate_forecast(model: str, ticker: str, start_date: str, steps: int) -> d
         return {"dates": future_dates.strftime("%Y-%m-%d").tolist(), "predictions": fc.tolist()}
 
     elif model_lower == "lightgbm":
-        booster = lgb.Booster(model_file=os.path.join(ticker_folder, f"LightGBM_{ticker_symbol}.txt"))
+        model_path = os.path.join(ticker_folder, f"LightGBM_{ticker_symbol}.txt")
+        booster = _load_validated_lightgbm_model(model_path)
         data = joblib.load(os.path.join(ticker_folder, f"LightGBM_{ticker_symbol}_data.pkl"))
         current_features = data["last_features"].copy()
         predictions = []

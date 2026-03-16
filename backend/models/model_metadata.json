@@ -44,10 +44,10 @@
       "LightGBM": {
         "name": "LightGBM",
         "filename": "LightGBM_EURUSD.txt",
-        "training_cutoff_date": "2026-02-27",
+        "training_cutoff_date": "2026-03-13",
         "model_type": "lightgbm",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 05:07:52"
+        "last_model_update": "2026-03-16 11:29:22"
       },
       "LinearRegression": {
         "name": "LinearRegression",
@@ -69,11 +69,11 @@
     "data_info": {
       "symbol": "EURUSD=X",
       "description": "EURUSD Currency Pair",
-      "training_period_start": "2024-05-10",
-      "training_period_end": "2026-02-27",
-      "prediction_valid_from": "2026-02-27"
+      "training_period_start": "2024-07-19",
+      "training_period_end": "2026-03-13",
+      "prediction_valid_from": "2026-03-13"
     },
-    "last_update": "2026-03-16 08:16:40"
+    "last_update": "2026-03-16 11:29:22"
   },
   "NZDUSD": {
     "models": {
@@ -120,10 +120,10 @@
       "LightGBM": {
         "name": "LightGBM",
         "filename": "LightGBM_NZDUSD.txt",
-        "training_cutoff_date": "2026-02-09",
+        "training_cutoff_date": "2026-03-13",
         "model_type": "lightgbm",
         "data_symbol": "NZDUSD=X",
-        "last_model_update": "2026-03-15 16:26:50"
+        "last_model_update": "2026-03-16 11:29:23"
       },
       "LinearRegression": {
         "name": "LinearRegression",
@@ -144,9 +144,12 @@
     },
     "data_info": {
       "symbol": "NZDUSD=X",
-      "description": "NZDUSD Currency Pair"
+      "description": "NZDUSD Currency Pair",
+      "training_period_start": "2024-07-19",
+      "training_period_end": "2026-03-13",
+      "prediction_valid_from": "2026-03-13"
     },
-    "last_update": "2026-03-15 16:26:53"
+    "last_update": "2026-03-16 11:29:23"
   },
   "GCF": {
     "models": {
@@ -193,10 +196,10 @@
       "LightGBM": {
         "name": "LightGBM",
         "filename": "LightGBM_GCF.txt",
-        "training_cutoff_date": "2026-02-09",
+        "training_cutoff_date": "2026-03-13",
         "model_type": "lightgbm",
         "data_symbol": "GC=F",
-        "last_model_update": "2026-03-15 17:03:13"
+        "last_model_update": "2026-03-16 11:29:24"
       },
       "LinearRegression": {
         "name": "LinearRegression",
@@ -218,10 +221,10 @@
     "data_info": {
       "symbol": "GC=F",
       "description": "GCF Currency Pair",
-      "training_period_start": "2025-04-15",
-      "training_period_end": "2026-02-27",
-      "prediction_valid_from": "2026-02-27"
+      "training_period_start": "2025-06-27",
+      "training_period_end": "2026-03-13",
+      "prediction_valid_from": "2026-03-13"
     },
-    "last_update": "2026-03-16 04:55:45"
+    "last_update": "2026-03-16 11:29:24"
   }
 }
