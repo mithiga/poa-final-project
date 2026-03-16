@@ -155,6 +155,46 @@ async def train_all(request: TrainAllRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/train_all_async/start", tags=["Training"])
+async def train_all_async_start(request: TrainAllRequest):
+    """Start async Train All job and return a job handle."""
+    try:
+        return TrainingService.start_train_all_job(
+            ticker=request.ticker,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            train_size=request.train_size,
+            force_retrain=request.force_retrain,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/train_all_async/status", tags=["Training"])
+async def train_all_async_status(job_id: str = Query(..., description="Async job ID")):
+    """Get async Train All job state."""
+    state = TrainingService.get_train_all_job(job_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return state
+
+
+@app.post("/train_all_async/cancel", tags=["Training"])
+async def train_all_async_cancel(payload: dict):
+    """Request cancellation for an async Train All job."""
+    job_id = payload.get("job_id") if isinstance(payload, dict) else None
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id is required")
+    state = TrainingService.cancel_train_all_job(str(job_id))
+    if not state:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": str(job_id),
+        "status": state.get("status"),
+        "cancel_requested": bool(state.get("cancel_requested", False)),
+    }
+
+
 # ─── System & Metadata ───────────────────────────────────────────────────────────
 
 @app.get("/status", response_model=SystemStatusResponse, tags=["System"])

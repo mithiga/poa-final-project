@@ -41,6 +41,10 @@ class TrainRequest(BaseModel):
     end_date: str = Field(..., description="Training end date (YYYY-MM-DD)")
     train_size: float = Field(default=0.8, ge=0.5, le=0.95,
                               description="Fraction of data used for training")
+    force_retrain: bool = Field(
+        default=False,
+        description="If true, retrain even when a current model artifact already exists"
+    )
 
     @field_validator("model")
     @classmethod
@@ -65,6 +69,10 @@ class TrainAllRequest(BaseModel):
     start_date: str = Field(..., description="Training start date (YYYY-MM-DD)")
     end_date: str = Field(..., description="Training end date (YYYY-MM-DD)")
     train_size: float = Field(default=0.8, ge=0.5, le=0.95)
+    force_retrain: bool = Field(
+        default=False,
+        description="If true, retrain all models even when current artifacts already exist"
+    )
 
 
 class TrainAllResponse(BaseModel):

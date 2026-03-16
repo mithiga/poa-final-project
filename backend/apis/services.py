@@ -3,6 +3,10 @@ Service layer — bridges the API endpoints and the ML pipeline.
 """
 
 import os
+import threading
+import traceback
+import uuid
+from datetime import datetime
 from typing import Dict, Optional, List, Any
 
 import pandas as pd
@@ -56,10 +60,196 @@ class ForecastService:
 class TrainingService:
     """Handles model training requests."""
 
+    _train_all_jobs: Dict[str, Dict[str, Any]] = {}
+    _train_all_jobs_lock = threading.Lock()
+
+    @staticmethod
+    def _trainable_model_names() -> List[str]:
+        """Return trainable model names excluding alias entries."""
+        return [name for name in MODEL_TRAINERS.keys() if name != "SARIMA"]
+
+    @staticmethod
+    def _resolve_train_all_tickers(ticker: str) -> List[str]:
+        """Resolve a ticker request into one or many trainable ticker symbols."""
+        if str(ticker).upper() != "ALL":
+            return [ticker]
+
+        metadata_tickers = SystemService.get_available_tickers()
+        if metadata_tickers:
+            return [f"{symbol}=X" if "=" not in symbol and symbol != "GCF" else ("GC=F" if symbol == "GCF" else symbol)
+                    for symbol in metadata_tickers]
+
+        # Safe fallback when metadata is empty (fresh deployment).
+        return ["EURUSD=X", "NZDUSD=X", "GC=F"]
+
+    @classmethod
+    def get_train_all_job(cls, job_id: str) -> Optional[Dict[str, Any]]:
+        """Return the current state of a background Train All job."""
+        with cls._train_all_jobs_lock:
+            state = cls._train_all_jobs.get(job_id)
+            return dict(state) if state else None
+
+    @classmethod
+    def cancel_train_all_job(cls, job_id: str) -> Optional[Dict[str, Any]]:
+        """Request cancellation for a background Train All job."""
+        with cls._train_all_jobs_lock:
+            state = cls._train_all_jobs.get(job_id)
+            if not state:
+                return None
+            if state.get("status") == "running":
+                state["cancel_requested"] = True
+                state["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return dict(state)
+
+    @classmethod
+    def _set_job_state(cls, job_id: str, **updates: Any) -> None:
+        with cls._train_all_jobs_lock:
+            if job_id not in cls._train_all_jobs:
+                return
+            cls._train_all_jobs[job_id].update(updates)
+            cls._train_all_jobs[job_id]["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @classmethod
+    def start_train_all_job(cls, ticker: str, start_date: str, end_date: str,
+                            train_size: float = 0.8, force_retrain: bool = False) -> Dict[str, Any]:
+        """Start Train All in a background thread and return a job ID."""
+        tickers = cls._resolve_train_all_tickers(ticker)
+        model_names = cls._trainable_model_names()
+        total_tickers = len(tickers)
+        total_models = len(model_names)
+        total_units = max(1, total_tickers * total_models)
+
+        job_id = str(uuid.uuid4())
+        job_state = {
+            "job_id": job_id,
+            "status": "running",
+            "cancel_requested": False,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "ticker": ticker,
+            "start_date": start_date,
+            "end_date": end_date,
+            "train_size": train_size,
+            "force_retrain": bool(force_retrain),
+            "total_tickers": total_tickers,
+            "total_models": total_models,
+            "total_units": total_units,
+            "completed_units": 0,
+            "current_ticker": None,
+            "result": None,
+            "error": None,
+        }
+
+        with cls._train_all_jobs_lock:
+            cls._train_all_jobs[job_id] = job_state
+
+        def _runner() -> None:
+            try:
+                by_ticker: Dict[str, Any] = {}
+                succeeded = 0
+                failed = 0
+                completed_units = 0
+
+                for tk in tickers:
+                    latest_state = cls.get_train_all_job(job_id) or {}
+                    if latest_state.get("cancel_requested"):
+                        cls._set_job_state(
+                            job_id,
+                            status="canceled",
+                            completed_units=completed_units,
+                            result={
+                                "by_ticker": by_ticker,
+                                "summary": {
+                                    "total_tickers": total_tickers,
+                                    "succeeded": succeeded,
+                                    "failed": failed,
+                                    "canceled": True,
+                                },
+                            },
+                        )
+                        return
+
+                    cls._set_job_state(job_id, current_ticker=tk)
+
+                    try:
+                        # force_retrain is accepted for compatibility; current training path retrains by default.
+                        _ = force_retrain
+                        result = train_all_models(
+                            start_date=start_date,
+                            end_date=end_date,
+                            ticker=tk,
+                            train_size=train_size,
+                        )
+                        by_ticker[tk] = {
+                            "status": "success",
+                            "evaluation": result.get("evaluation", {}),
+                            "training": result.get("training", {}),
+                        }
+                        succeeded += 1
+                    except Exception as exc:
+                        by_ticker[tk] = {
+                            "status": "failed",
+                            "error": str(exc),
+                            "traceback": traceback.format_exc(),
+                            "evaluation": {},
+                            "training": {},
+                        }
+                        failed += 1
+
+                    completed_units += total_models
+                    cls._set_job_state(job_id, completed_units=min(completed_units, total_units))
+
+                payload = {
+                    "by_ticker": by_ticker,
+                    "summary": {
+                        "total_tickers": total_tickers,
+                        "succeeded": succeeded,
+                        "failed": failed,
+                        "canceled": False,
+                    },
+                }
+
+                # Keep backward compatibility for single-ticker consumers.
+                if total_tickers == 1:
+                    one = by_ticker.get(tickers[0], {})
+                    payload.setdefault("evaluation", one.get("evaluation", {}))
+                    payload.setdefault("training", one.get("training", {}))
+
+                cls._set_job_state(
+                    job_id,
+                    status="completed" if failed == 0 else "completed",
+                    current_ticker=None,
+                    completed_units=total_units,
+                    result=payload,
+                )
+            except Exception as exc:
+                cls._set_job_state(
+                    job_id,
+                    status="failed",
+                    current_ticker=None,
+                    error=str(exc),
+                )
+
+        thread = threading.Thread(target=_runner, daemon=True, name=f"train-all-{job_id[:8]}")
+        thread.start()
+
+        return {
+            "job_id": job_id,
+            "status": "running",
+            "total_tickers": total_tickers,
+            "total_models": total_models,
+            "total_units": total_units,
+            "completed_units": 0,
+        }
+
     @staticmethod
     def train_single(ticker: str, model: str, start_date: str,
-                     end_date: str, train_size: float = 0.8):
+                     end_date: str, train_size: float = 0.8,
+                     force_retrain: bool = False):
         """Train a single model and return evaluation metrics."""
+        # `force_retrain` is accepted for API/frontend compatibility.
+        # Current pipeline always retrains for the requested window.
+        _ = force_retrain
         result = train_model(
             start_date=start_date,
             end_date=end_date,
@@ -71,8 +261,12 @@ class TrainingService:
 
     @staticmethod
     def train_all(ticker: str, start_date: str, end_date: str,
-                  train_size: float = 0.8) -> dict:
+                  train_size: float = 0.8,
+                  force_retrain: bool = False) -> dict:
         """Train all supported models."""
+        # `force_retrain` is accepted for API/frontend compatibility.
+        # Current pipeline always retrains for the requested window.
+        _ = force_retrain
         return train_all_models(
             start_date=start_date,
             end_date=end_date,
