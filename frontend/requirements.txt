@@ -1,6 +1,7 @@
 # UI Framework
 streamlit>=1.31.0
 streamlit-extras>=0.3.0
+streamlit-option-menu>=0.3.13
 
 # Communication
 requests>=2.31.0

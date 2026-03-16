@@ -12,7 +12,15 @@ from datetime import datetime, timedelta
 from utils.runtime_cache import runtime_safe_cache_data
 
 
-DEFAULT_MODELS = ["ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU", "Prophet", "LightGBM", "LinearRegression", "RandomForest"]
+DEFAULT_MODELS = ["Prophet", "ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU", "LightGBM", "LinearRegression", "RandomForest"]
+
+
+def _models_with_prophet_default(models: list[str]) -> list[str]:
+    """Ensure Prophet is first when present in model choices."""
+    cleaned = [m for m in (models or []) if m]
+    prophet = [m for m in cleaned if str(m).lower() == "prophet"]
+    others = [m for m in cleaned if str(m).lower() != "prophet"]
+    return prophet + others
 
 
 @runtime_safe_cache_data(ttl=60, show_spinner=False)
@@ -20,10 +28,10 @@ def _cached_available_models(api_base_url: str):
     try:
         res = requests.get(f"{api_base_url}/available_models", timeout=5)
         if res.status_code == 200:
-            return res.json().get("models", [])
+            return _models_with_prophet_default(res.json().get("models", []))
     except Exception:
         pass
-    return DEFAULT_MODELS
+    return _models_with_prophet_default(DEFAULT_MODELS)
 
 
 @runtime_safe_cache_data(ttl=60, show_spinner=False)
@@ -842,7 +850,7 @@ def render_model_management_page(T, API_BASE_URL):
         # Model selection for hyperparameters
         hp_model = st.selectbox(
             "Select Model",
-            ["ARIMA", "SARIMAX", "LSTM", "GRU", "Prophet", "LightGBM", "LinearRegression", "RandomForest"],
+            ["Prophet", "ARIMA", "SARIMAX", "LSTM", "GRU", "LightGBM", "LinearRegression", "RandomForest"],
             key="hp_model_select"
         )
         

@@ -9,7 +9,15 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 
-DEFAULT_MODELS = ["ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU", "Prophet", "LightGBM", "LinearRegression", "RandomForest"]
+DEFAULT_MODELS = ["Prophet", "ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU", "LightGBM", "LinearRegression", "RandomForest"]
+
+
+def _models_with_prophet_default(models: list[str]) -> list[str]:
+    """Ensure Prophet is first when present in model choices."""
+    cleaned = [m for m in (models or []) if m]
+    prophet = [m for m in cleaned if str(m).lower() == "prophet"]
+    others = [m for m in cleaned if str(m).lower() != "prophet"]
+    return prophet + others
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -17,10 +25,10 @@ def _cached_available_models(api_base_url: str):
     try:
         res = requests.get(f"{api_base_url}/available_models", timeout=5)
         if res.status_code == 200:
-            return res.json().get("models", [])
+            return _models_with_prophet_default(res.json().get("models", []))
     except Exception:
         pass
-    return DEFAULT_MODELS
+    return _models_with_prophet_default(DEFAULT_MODELS)
 
 
 def render_prediction_page(T, API_BASE_URL):
@@ -347,15 +355,15 @@ def render_prediction_page(T, API_BASE_URL):
                             cutoff_val = str(cutoff_date) if cutoff_date else "N/A"
                             
                             with mcol1:
-                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T["text_secondary"]};'>Ticker</span><br><span style='font-size:0.85rem; font-weight:bold;'>{ticker_val}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T['text_secondary']};'>Ticker</span><br><span style='font-size:0.85rem; font-weight:bold;'>{ticker_val}</span></div>", unsafe_allow_html=True)
                             with mcol2:
-                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T["text_secondary"]};'>Model</span><br><span style='font-size:0.85rem; font-weight:bold;'>{model_val}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T['text_secondary']};'>Model</span><br><span style='font-size:0.85rem; font-weight:bold;'>{model_val}</span></div>", unsafe_allow_html=True)
                             with mcol3:
-                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T["text_secondary"]};'>Hist. Days</span><br><span style='font-size:0.85rem; font-weight:bold;'>{len(historical_data)}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T['text_secondary']};'>Hist. Days</span><br><span style='font-size:0.85rem; font-weight:bold;'>{len(historical_data)}</span></div>", unsafe_allow_html=True)
                             with mcol4:
-                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T["text_secondary"]};'>Cutoff Date</span><br><span style='font-size:0.75rem; font-weight:bold;'>{cutoff_val}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T['text_secondary']};'>Cutoff Date</span><br><span style='font-size:0.75rem; font-weight:bold;'>{cutoff_val}</span></div>", unsafe_allow_html=True)
                             with mcol5:
-                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T["text_secondary"]};'>Forecast Days</span><br><span style='font-size:0.85rem; font-weight:bold;'>{days}</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='text-align:center;'><span style='font-size:0.75rem; color:{T['text_secondary']};'>Forecast Days</span><br><span style='font-size:0.85rem; font-weight:bold;'>{days}</span></div>", unsafe_allow_html=True)
                             
                             # Status
                             st.success(f"✅ {data.get('status', 'Forecast generated successfully')}")
@@ -364,9 +372,9 @@ def render_prediction_page(T, API_BASE_URL):
                             st.error(f"⚠️ Model not found: {res.json().get('detail', 'No trained model available for this ticker')}")
                         else:
                             st.error(f"❌ Server Error ({res.status_code}): {res.text}")
-                            
-                        except requests.exceptions.ConnectionError:
-                            st.error("⚠️ Connection Failed: Backend service unavailable.")
+
+                    except requests.exceptions.ConnectionError:
+                        st.error("⚠️ Connection Failed: Backend service unavailable.")
                     except requests.exceptions.Timeout:
                         st.error("⏱️ Request timed out. The backend may be overloaded or model training is taking too long.")
                     except Exception as e:
