@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
@@ -111,6 +114,106 @@ def _ensure_backend_loaded() -> bool:
     except Exception as exc:
         _BACKEND_IMPORT_ERROR = exc
         return False
+
+
+# ─── Adapter-local async Train All job manager ──────────────────────────────
+_train_all_jobs: Dict[str, Dict[str, Any]] = {}
+_train_all_jobs_lock = threading.Lock()
+
+
+def _start_train_all_job(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    train_size: float = 0.8,
+    force_retrain: bool = False,
+) -> Dict[str, Any]:
+    """Launch Train All in a background thread, return a job descriptor."""
+    job_id = str(uuid.uuid4())
+
+    job_state: Dict[str, Any] = {
+        "job_id": job_id,
+        "status": "queued",
+        "ticker": ticker,
+        "total_tickers": 1,
+        "total_models": 0,
+        "total_units": 0,
+        "completed_units": 0,
+        "current_ticker": None,
+        "cancel_requested": False,
+        "result": None,
+        "error": None,
+        "started_at": datetime.utcnow().isoformat() + "Z",
+        "finished_at": None,
+    }
+
+    with _train_all_jobs_lock:
+        _train_all_jobs[job_id] = job_state
+
+    def _run() -> None:
+        try:
+            with _train_all_jobs_lock:
+                j = _train_all_jobs.get(job_id)
+                if not j:
+                    return
+                if j.get("cancel_requested"):
+                    j["status"] = "canceled"
+                    j["finished_at"] = datetime.utcnow().isoformat() + "Z"
+                    return
+                j["status"] = "running"
+                j["current_ticker"] = ticker
+
+            result = TrainingService.train_all(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                train_size=train_size,
+                force_retrain=force_retrain,
+            )
+
+            with _train_all_jobs_lock:
+                j = _train_all_jobs.get(job_id)
+                if not j:
+                    return
+                if j.get("cancel_requested") and j.get("status") != "completed":
+                    j["status"] = "canceled"
+                    j["finished_at"] = datetime.utcnow().isoformat() + "Z"
+                    return
+                j["status"] = "completed"
+                j["result"] = result
+                j["current_ticker"] = None
+                j["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        except Exception as exc:
+            with _train_all_jobs_lock:
+                j = _train_all_jobs.get(job_id)
+                if not j:
+                    return
+                j["status"] = "failed"
+                j["error"] = str(exc)
+                j["current_ticker"] = None
+                j["finished_at"] = datetime.utcnow().isoformat() + "Z"
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return {"job_id": job_id, "status": "queued"}
+
+
+def _get_train_all_job(job_id: str) -> Optional[Dict[str, Any]]:
+    with _train_all_jobs_lock:
+        j = _train_all_jobs.get(job_id)
+        return dict(j) if j else None
+
+
+def _cancel_train_all_job(job_id: str) -> Optional[Dict[str, Any]]:
+    with _train_all_jobs_lock:
+        j = _train_all_jobs.get(job_id)
+        if not j:
+            return None
+        j["cancel_requested"] = True
+        if j.get("status") == "queued":
+            j["status"] = "canceled"
+            j["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        return dict(j)
 
 
 class EmbeddedResponse:
@@ -284,7 +387,7 @@ def _handle_get(path: str, params: Dict[str, Any]) -> EmbeddedResponse:
         job_id = params.get("job_id")
         if not job_id:
             return _json_response(400, {"detail": "job_id is required"})
-        state = TrainingService.get_train_all_job(str(job_id))
+        state = _get_train_all_job(str(job_id))
         if not state:
             return _json_response(404, {"detail": "Job not found"})
         return _json_response(200, state)
@@ -300,7 +403,7 @@ def _handle_post(path: str, json_body: Dict[str, Any]) -> EmbeddedResponse:
         job_id = json_body.get("job_id")
         if not job_id:
             return _json_response(400, {"detail": "job_id is required"})
-        state = TrainingService.cancel_train_all_job(str(job_id))
+        state = _cancel_train_all_job(str(job_id))
         if not state:
             return _json_response(404, {"detail": "Job not found"})
         return _json_response(
@@ -384,7 +487,7 @@ def _handle_post(path: str, json_body: Dict[str, Any]) -> EmbeddedResponse:
 
     if path == "/train_all_async/start":
         request = TrainAllRequest(**json_body)
-        payload = TrainingService.start_train_all_job(
+        payload = _start_train_all_job(
             ticker=request.ticker,
             start_date=request.start_date,
             end_date=request.end_date,
