@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Any
 
 
-SUPPORTED_MODELS = ["ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU",
-                    "Prophet", "LightGBM", "LinearRegression", "RandomForest"]
+SUPPORTED_MODELS = ["Prophet", "ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU",
+                    "LightGBM", "LinearRegression", "RandomForest"]
 
 
 class PredictionRequest(BaseModel):
