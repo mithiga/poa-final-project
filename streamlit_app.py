@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import runpy
 import sys
+import types
 from pathlib import Path
 
 
@@ -14,8 +16,22 @@ for _p in (str(FRONTEND_ROOT), str(BACKEND_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-# Execute app.py directly (without module import caching) so Streamlit reruns
-# always execute the frontend script fresh.
-app_path = FRONTEND_ROOT / "app.py"
-app_code = compile(app_path.read_text(encoding="utf-8"), str(app_path), "exec")
-exec(app_code, {"__name__": "__main__", "__file__": str(app_path)})
+def _ensure_local_namespace_package(name: str, directory: Path) -> None:
+    """Ensure imports like `from utils...` resolve to the frontend local package."""
+    existing = sys.modules.get(name)
+    if existing is not None and hasattr(existing, "__path__"):
+        paths = [str(p) for p in getattr(existing, "__path__", [])]
+        if str(directory) in paths:
+            return
+
+    pkg = types.ModuleType(name)
+    pkg.__path__ = [str(directory)]
+    pkg.__package__ = name
+    sys.modules[name] = pkg
+
+
+_ensure_local_namespace_package("utils", FRONTEND_ROOT / "utils")
+_ensure_local_namespace_package("pages", FRONTEND_ROOT / "pages")
+
+# Execute app.py via runpy so each Streamlit rerun gets a fresh main script context.
+runpy.run_path(str(FRONTEND_ROOT / "app.py"), run_name="__main__")
