@@ -7,9 +7,10 @@ import requests
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, timedelta
+from utils.runtime_cache import runtime_safe_cache_data
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@runtime_safe_cache_data(ttl=60, show_spinner=False)
 def _cached_market_overview(api_base_url: str, ticker: str, start_date: str, end_date: str):
     try:
         res = requests.get(
@@ -125,17 +126,6 @@ def render_market_data_page(T, API_BASE_URL):
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        f"""
-        <div class='market-hero'>
-            <h3 style='margin:0 0 8px 0; color:{T['heading_color']};'>Institutional View of the Market</h3>
-            <p style='margin:0; color:{T['text_primary']}; font-size:0.96rem;'>
-                Live charts, AI model consensus, and a fast read of directional sentiment in one workspace.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     st.divider()
     
     # ─── Live Price Section ─────────────────────────────────────────────────────────

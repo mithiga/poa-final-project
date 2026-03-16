@@ -7,12 +7,13 @@ import requests
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, timedelta
+from utils.runtime_cache import runtime_safe_cache_data
 
 
 DEFAULT_MODELS = ["ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU", "Prophet", "LightGBM", "LinearRegression", "RandomForest"]
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@runtime_safe_cache_data(ttl=60, show_spinner=False)
 def _cached_available_models(api_base_url: str):
     try:
         res = requests.get(f"{api_base_url}/available_models", timeout=5)
@@ -23,7 +24,7 @@ def _cached_available_models(api_base_url: str):
     return DEFAULT_MODELS
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@runtime_safe_cache_data(ttl=60, show_spinner=False)
 def _cached_available_tickers(api_base_url: str):
     try:
         res = requests.get(f"{api_base_url}/available_tickers", timeout=5)
@@ -34,7 +35,7 @@ def _cached_available_tickers(api_base_url: str):
     return []
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@runtime_safe_cache_data(ttl=60, show_spinner=False)
 def _cached_hyperparameters(api_base_url: str, model: str):
     try:
         hp_response = requests.get(f"{api_base_url}/hyperparameters", params={"model": model}, timeout=5)

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 from utils.theme import THEMES, get_theme_css, get_navbar_toggle_html
 from utils.backend_adapter import configure_backend
+from utils.runtime_cache import runtime_safe_cache_data
 
 try:
     from streamlit_extras.metric_cards import style_metric_cards
@@ -37,7 +38,7 @@ st.markdown(get_navbar_toggle_html(T), unsafe_allow_html=True)
 
 
 # ─── Shared API Functions ───────────────────────────────────────────────────────
-@st.cache_data(ttl=60, show_spinner=False)
+@runtime_safe_cache_data(ttl=60, show_spinner=False)
 def fetch_available_models():
     """Fetch list of supported model names."""
     try:
@@ -49,7 +50,7 @@ def fetch_available_models():
     return ["ARIMA", "SARIMAX", "SARIMA", "LSTM", "GRU", "Prophet", "LightGBM", "LinearRegression", "RandomForest"]
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@runtime_safe_cache_data(ttl=60, show_spinner=False)
 def fetch_available_tickers():
     """Fetch list of tickers with trained models."""
     try:
@@ -61,7 +62,7 @@ def fetch_available_tickers():
     return []
 
 
-@st.cache_data(ttl=5, show_spinner=False)
+@runtime_safe_cache_data(ttl=5, show_spinner=False)
 def fetch_system_status():
     """Fetch system status."""
     try:

@@ -35,6 +35,10 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import TimeSeriesSplit
 
 from pydantic import BaseModel
+from .pandas_compat import patch_stringdtype_unpickle_compat
+
+
+patch_stringdtype_unpickle_compat()
 
 
 # ─── PyTorch Model Definitions ───────────────────────────────────────────────────
@@ -405,13 +409,22 @@ def fetch_data(start_date: str, end_date: str, ticker: str) -> pd.DataFrame:
         "XAUUSD": "GC=F",
         "XAUUSD=X": "GC=F",
         "XAU/USD": "GC=F",
+        "GCF": "GC=F",
+        "GCF=X": "GC=F",
     }
     yf_ticker = alias_map.get(ticker, ticker)
 
-    data = yf.download(yf_ticker, start=start_date, end=end_date)
+    data = yf.download(yf_ticker, start=start_date, end=end_date,
+                       auto_adjust=False, progress=False, actions=False)
 
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
+
+    if data.empty or "Close" not in data.columns:
+        raise ValueError(
+            f"No market data returned for ticker '{ticker}' (resolved to '{yf_ticker}') "
+            f"between {start_date} and {end_date}."
+        )
 
     data.index = pd.to_datetime(data.index)
 
@@ -423,7 +436,7 @@ def fetch_data(start_date: str, end_date: str, ticker: str) -> pd.DataFrame:
 
 def clean_data(data: pd.DataFrame) -> pd.DataFrame:
     """Forward-fill missing values."""
-    data.ffill(inplace=True)
+    data = data.ffill()
     return data
 
 
@@ -503,11 +516,11 @@ def arima_model(train: pd.DataFrame, test: Optional[pd.DataFrame], ticker: str =
     best_order = model_auto.order
     print(f"Optimal ARIMA Order: {best_order}")
 
-    fitted = ARIMA(train["Close"], order=best_order).fit()
+    fitted = ARIMA(np.asarray(train["Close"], dtype=np.float64), order=best_order).fit()
     if final_fit or test is None or len(test) == 0:
         rmse = mae = mape = float("nan")
     else:
-        predictions = fitted.forecast(steps=len(test))
+        predictions = np.asarray(fitted.forecast(steps=len(test)), dtype=np.float64)
         rmse, mae, mape = evaluate_preds(test["Close"], predictions, "ARIMA")
 
     ticker_folder, ticker_symbol = get_ticker_folder(ticker)
@@ -528,11 +541,11 @@ def sarimax_model(train: pd.DataFrame, test: Optional[pd.DataFrame], ticker: str
     best_order = model_auto.order
     print(f"Optimal SARIMAX Order: {best_order}")
 
-    fitted = SARIMAX(train["Close"], order=best_order).fit()
+    fitted = SARIMAX(np.asarray(train["Close"], dtype=np.float64), order=best_order).fit(disp=False)
     if final_fit or test is None or len(test) == 0:
         rmse = mae = mape = float("nan")
     else:
-        predictions = fitted.forecast(steps=len(test))
+        predictions = np.asarray(fitted.forecast(steps=len(test)), dtype=np.float64)
         rmse, mae, mape = evaluate_preds(test["Close"], predictions, "SARIMAX")
 
     ticker_folder, ticker_symbol = get_ticker_folder(ticker)
@@ -678,9 +691,45 @@ def gru_model(train: pd.DataFrame, test: Optional[pd.DataFrame], ticker: str = "
     return _train_sequence_model(GRUModel, "GRU", train, test, ticker, final_fit=final_fit)
 
 
+NOTEBOOK_PROPHET_DEFAULT_PARAMS = {
+    # Notebook behavior used a fixed daily_seasonality=False setup and selected
+    # this pair from grid-search in baseline experiments.
+    "changepoint_prior_scale": 0.1,
+    "seasonality_prior_scale": 0.1,
+    "daily_seasonality": False,
+}
+
+
+def _resolve_prophet_params(hyperparameters: Optional[dict]) -> dict:
+    """Resolve Prophet params from saved/custom input with notebook-style fallbacks."""
+    hp = hyperparameters or {}
+    resolved = {
+        "changepoint_prior_scale": float(hp.get(
+            "changepoint_prior_scale", NOTEBOOK_PROPHET_DEFAULT_PARAMS["changepoint_prior_scale"]
+        )),
+        "seasonality_prior_scale": float(hp.get(
+            "seasonality_prior_scale", NOTEBOOK_PROPHET_DEFAULT_PARAMS["seasonality_prior_scale"]
+        )),
+        "daily_seasonality": _coerce_bool(
+            hp.get("daily_seasonality", NOTEBOOK_PROPHET_DEFAULT_PARAMS["daily_seasonality"]),
+            NOTEBOOK_PROPHET_DEFAULT_PARAMS["daily_seasonality"],
+        ),
+    }
+
+    # Keep explicit user/saved options when present; otherwise use Prophet defaults.
+    if "seasonality_mode" in hp:
+        resolved["seasonality_mode"] = hp["seasonality_mode"]
+    if "weekly_seasonality" in hp:
+        resolved["weekly_seasonality"] = _coerce_bool(hp["weekly_seasonality"], True)
+    if "yearly_seasonality" in hp:
+        resolved["yearly_seasonality"] = _coerce_bool(hp["yearly_seasonality"], True)
+
+    return resolved
+
+
 def prophet_model(train: pd.DataFrame, test: Optional[pd.DataFrame], ticker: str = "EURUSD=X",
-                  final_fit: bool = False) -> ModelResult:
-    print("Training Prophet model with hyperparameter tuning...")
+                  final_fit: bool = False, hyperparameters: Optional[dict] = None) -> ModelResult:
+    print("Training Prophet model...")
     ticker_folder, ticker_symbol = get_ticker_folder(ticker)
 
     train_df = train.reset_index().rename(columns={"Date": "ds", "Close": "y"})
@@ -695,34 +744,9 @@ def prophet_model(train: pd.DataFrame, test: Optional[pd.DataFrame], ticker: str
             test_df = test_df.rename(columns={test_df.columns[0]: "ds"})
         test_df["ds"] = pd.to_datetime(test_df["ds"])
 
-    train_size = len(train_df)
-    param_grid = {
-        "changepoint_prior_scale": [0.01, 0.1, 0.5],
-        "seasonality_prior_scale": [0.1, 1.0, 10.0]
-    }
-    all_params = [dict(zip(param_grid.keys(), v)) for v in itertools.product(*param_grid.values())]
-    rmses = []
-
-    if train_size >= 365:
-        initial_period, period, horizon = "365 days", "90 days", "30 days"
-    else:
-        initial_period = f"{int(train_size * 0.6)} days"
-        period = f"{int(train_size * 0.15)} days"
-        horizon = f"{int(train_size * 0.1)} days"
-
-    for params in all_params:
-        m = Prophet(**params, daily_seasonality=False)
-        m.add_country_holidays(country_name="US")
-        m.fit(train_df)
-        df_cv = cross_validation(m, initial=initial_period, period=period,
-                                 horizon=horizon, parallel="processes")
-        df_p = performance_metrics(df_cv, rolling_window=1)
-        rmses.append(df_p["rmse"].values[0])
-
-    best_params = all_params[np.argmin(rmses)]
-    print(f"Best Prophet Parameters: {best_params}")
-
-    m_best = Prophet(**best_params, daily_seasonality=False)
+    # Normal train/train_all path: do NOT run CV search. Use saved params when
+    # available, else notebook-style defaults.
+    m_best = Prophet(**_resolve_prophet_params(hyperparameters))
     m_best.add_country_holidays(country_name="US")
     m_best.fit(train_df)
 
@@ -935,9 +959,18 @@ def _train_model_with_optional_hyperparameters(model_name: str,
                                                test_df: Optional[pd.DataFrame],
                                                ticker: str,
                                                hyperparameters: Optional[dict] = None,
-                                               final_fit: bool = False) -> ModelResult:
+                                               final_fit: bool = False,
+                                               tuning_requested: bool = False) -> ModelResult:
     """Train model either with default trainer or explicit hyperparameters."""
     model_upper = model_name.upper()
+
+    if model_upper == "PROPHET":
+        # Restrict CV search to explicit frontend tuning requests only.
+        if tuning_requested and hyperparameters is not None:
+            return _train_prophet_with_hp(train_df, test_df, ticker, hyperparameters, final_fit=final_fit)
+
+        resolved_hp = hyperparameters if hyperparameters is not None else get_saved_best_hyperparameters(ticker, model_name)
+        return prophet_model(train_df, test_df, ticker, final_fit=final_fit, hyperparameters=resolved_hp)
 
     if hyperparameters is None:
         trainer = MODEL_TRAINERS.get(model_name)
@@ -953,8 +986,6 @@ def _train_model_with_optional_hyperparameters(model_name: str,
         return _train_lstm_with_hp(train_df, test_df, ticker, hyperparameters, final_fit=final_fit)
     if model_upper == "GRU":
         return _train_gru_with_hp(train_df, test_df, ticker, hyperparameters, final_fit=final_fit)
-    if model_upper == "PROPHET":
-        return _train_prophet_with_hp(train_df, test_df, ticker, hyperparameters, final_fit=final_fit)
     if model_upper == "LIGHTGBM":
         return _train_lightgbm_with_hp(train_df, test_df, ticker, hyperparameters, final_fit=final_fit)
     if model_upper == "LINEARREGRESSION":
@@ -973,11 +1004,27 @@ def train_model(start_date: str, end_date: str, ticker: str,
     train, test = split_data(data, train_size)
 
     # 1) Evaluate on the requested train/test split.
-    eval_result = _train_model_with_optional_hyperparameters(model, train, test, ticker)
+    saved_hp = get_saved_best_hyperparameters(ticker, model) if model.upper() == "PROPHET" else None
+    eval_result = _train_model_with_optional_hyperparameters(
+        model,
+        train,
+        test,
+        ticker,
+        hyperparameters=saved_hp,
+        tuning_requested=False,
+    )
 
     # 2) Retrain and persist final artifacts on the full selected date range.
     if len(data) > 1:
-        _train_model_with_optional_hyperparameters(model, data, None, ticker, final_fit=True)
+        _train_model_with_optional_hyperparameters(
+            model,
+            data,
+            None,
+            ticker,
+            hyperparameters=saved_hp,
+            final_fit=True,
+            tuning_requested=False,
+        )
 
     # Keep data_info aligned with the selected training window.
     train_start = data.index[0].strftime("%Y-%m-%d")
@@ -1005,13 +1052,14 @@ def train_all_models(start_date: str, end_date: str, ticker: str,
             continue  # Skip alias
         print(f"\n--- Evaluating {model_name} ---")
         try:
-            saved_hp = get_saved_best_hyperparameters(ticker, model_name)
+            saved_hp = get_saved_best_hyperparameters(ticker, model_name) if model_name.upper() == "PROPHET" else None
             result = _train_model_with_optional_hyperparameters(
                 model_name,
                 train_split,
                 test_split,
                 ticker,
-                hyperparameters=saved_hp
+                hyperparameters=saved_hp,
+                tuning_requested=False,
             )
             evaluation_results[model_name] = {
                 "rmse": result.rmse,
@@ -1032,14 +1080,15 @@ def train_all_models(start_date: str, end_date: str, ticker: str,
             continue
         print(f"\n--- Retraining {model_name} on full data ---")
         try:
-            saved_hp = get_saved_best_hyperparameters(ticker, model_name)
+            saved_hp = get_saved_best_hyperparameters(ticker, model_name) if model_name.upper() == "PROPHET" else None
             _train_model_with_optional_hyperparameters(
                 model_name,
                 train_full,
                 None,
                 ticker,
                 hyperparameters=saved_hp,
-                final_fit=True
+                final_fit=True,
+                tuning_requested=False,
             )
             training_results[model_name] = {
                 "status": "success",
@@ -1089,7 +1138,8 @@ def train_model_with_hyperparameters(start_date: str, end_date: str, ticker: str
         train,
         test,
         ticker,
-        hyperparameters=hyperparameters
+        hyperparameters=hyperparameters,
+        tuning_requested=True,
     )
 
     # 2) Retrain final artifact on full selected date range with chosen parameters.
@@ -1109,7 +1159,8 @@ def train_model_with_hyperparameters(start_date: str, end_date: str, ticker: str
             None,
             ticker,
             hyperparameters=selected_hp,
-            final_fit=True
+            final_fit=True,
+            tuning_requested=True,
         )
 
     # Keep data_info aligned with the selected training window.
@@ -1147,15 +1198,15 @@ def _train_arima_with_hp(train, test, ticker, hp, final_fit: bool = False):
             try:
                 if splits:
                     for tr_idx, val_idx in splits:
-                        fold_train = train.iloc[tr_idx]["Close"]
+                        fold_train = np.asarray(train.iloc[tr_idx]["Close"], dtype=np.float64)
                         fold_val = train.iloc[val_idx]["Close"]
                         model_fit = ARIMA(fold_train, order=order).fit()
-                        pred = model_fit.forecast(steps=len(fold_val))
-                        cv_scores.append(_rmse(fold_val.values, np.asarray(pred)))
+                        pred = np.asarray(model_fit.forecast(steps=len(fold_val)), dtype=np.float64)
+                        cv_scores.append(_rmse(fold_val.values, pred))
                 else:
-                    model_fit = ARIMA(train["Close"], order=order).fit()
-                    pred = model_fit.forecast(steps=len(test))
-                    cv_scores.append(_rmse(test["Close"].values, np.asarray(pred)))
+                    model_fit = ARIMA(np.asarray(train["Close"], dtype=np.float64), order=order).fit()
+                    pred = np.asarray(model_fit.forecast(steps=len(test)), dtype=np.float64)
+                    cv_scores.append(_rmse(test["Close"].values, pred))
             except Exception as e:
                 print(f"ARIMA CV error {order}: {e}")
                 continue
@@ -1169,12 +1220,12 @@ def _train_arima_with_hp(train, test, ticker, hp, final_fit: bool = False):
             raise ValueError("No valid ARIMA hyperparameter combination found during CV.")
 
     final_order = (best_params["p"], best_params["d"], best_params["q"])
-    final_model = ARIMA(train["Close"], order=final_order).fit()
+    final_model = ARIMA(np.asarray(train["Close"], dtype=np.float64), order=final_order).fit()
     if final_fit or test is None or len(test) == 0:
         rmse = mae = mape = float("nan")
     else:
-        predictions = final_model.forecast(steps=len(test))
-        rmse, mae, mape = evaluate_preds(test["Close"].values, np.asarray(predictions), "ARIMA")
+        predictions = np.asarray(final_model.forecast(steps=len(test)), dtype=np.float64)
+        rmse, mae, mape = evaluate_preds(test["Close"].values, predictions, "ARIMA")
 
     filename = f"ARIMA_{ticker_symbol}.pkl"
     joblib.dump(final_model, os.path.join(ticker_folder, filename))
@@ -1221,15 +1272,15 @@ def _train_sarimax_with_hp(train, test, ticker, hp, final_fit: bool = False):
             try:
                 if splits:
                     for tr_idx, val_idx in splits:
-                        fold_train = train.iloc[tr_idx]["Close"]
+                        fold_train = np.asarray(train.iloc[tr_idx]["Close"], dtype=np.float64)
                         fold_val = train.iloc[val_idx]["Close"]
                         model_fit = SARIMAX(fold_train, order=order, seasonal_order=seasonal_order).fit(disp=False)
-                        pred = model_fit.forecast(steps=len(fold_val))
-                        cv_scores.append(_rmse(fold_val.values, np.asarray(pred)))
+                        pred = np.asarray(model_fit.forecast(steps=len(fold_val)), dtype=np.float64)
+                        cv_scores.append(_rmse(fold_val.values, pred))
                 else:
-                    model_fit = SARIMAX(train["Close"], order=order, seasonal_order=seasonal_order).fit(disp=False)
-                    pred = model_fit.forecast(steps=len(test))
-                    cv_scores.append(_rmse(test["Close"].values, np.asarray(pred)))
+                    model_fit = SARIMAX(np.asarray(train["Close"], dtype=np.float64), order=order, seasonal_order=seasonal_order).fit(disp=False)
+                    pred = np.asarray(model_fit.forecast(steps=len(test)), dtype=np.float64)
+                    cv_scores.append(_rmse(test["Close"].values, pred))
             except Exception as e:
                 print(f"SARIMAX CV error {order} x {seasonal_order}: {e}")
                 continue
@@ -1251,7 +1302,7 @@ def _train_sarimax_with_hp(train, test, ticker, hp, final_fit: bool = False):
             raise ValueError("No valid SARIMAX hyperparameter combination found during CV.")
 
     final_model = SARIMAX(
-        train["Close"],
+        np.asarray(train["Close"], dtype=np.float64),
         order=(best_params["p"], best_params["d"], best_params["q"]),
         seasonal_order=(
             best_params["seasonal_p"],
@@ -1263,8 +1314,8 @@ def _train_sarimax_with_hp(train, test, ticker, hp, final_fit: bool = False):
     if final_fit or test is None or len(test) == 0:
         rmse = mae = mape = float("nan")
     else:
-        predictions = final_model.forecast(steps=len(test))
-        rmse, mae, mape = evaluate_preds(test["Close"].values, np.asarray(predictions), "SARIMAX")
+        predictions = np.asarray(final_model.forecast(steps=len(test)), dtype=np.float64)
+        rmse, mae, mape = evaluate_preds(test["Close"].values, predictions, "SARIMAX")
 
     # Keep filename aligned with forecasting loader, which expects SARIMA_*.pkl
     filename = f"SARIMA_{ticker_symbol}.pkl"
@@ -1917,12 +1968,29 @@ def generate_forecast(model: str, ticker: str, start_date: str, steps: int) -> d
 
     elif model_lower == "arima":
         m = joblib.load(os.path.join(ticker_folder, f"ARIMA_{ticker_symbol}.pkl"))
-        fc = m.forecast(steps=steps)
+        try:
+            fc = np.asarray(m.forecast(steps=steps), dtype=np.float64)
+        except (TypeError, ValueError):
+            # pandas 2.3+ / statsmodels compat: re-initialize with numpy endog and apply saved params
+            endog_np = np.asarray(m.model.endog, dtype=np.float64).ravel()
+            fresh_res = ARIMA(endog_np, order=m.model.order).smooth(
+                np.asarray(m.params, dtype=np.float64)
+            )
+            fc = np.asarray(fresh_res.forecast(steps=steps), dtype=np.float64)
         return {"dates": future_dates.strftime("%Y-%m-%d").tolist(), "predictions": fc.tolist()}
 
     elif model_lower in ("sarimax", "sarima"):
         m = joblib.load(os.path.join(ticker_folder, f"SARIMA_{ticker_symbol}.pkl"))
-        fc = m.forecast(steps=steps)
+        try:
+            fc = np.asarray(m.forecast(steps=steps), dtype=np.float64)
+        except (TypeError, ValueError):
+            # pandas 2.3+ / statsmodels compat: re-initialize with numpy endog and apply saved params
+            endog_np = np.asarray(m.model.endog, dtype=np.float64).ravel()
+            seasonal_order = getattr(m.model, "seasonal_order", (0, 0, 0, 0))
+            fresh_res = SARIMAX(
+                endog_np, order=m.model.order, seasonal_order=seasonal_order
+            ).smooth(np.asarray(m.params, dtype=np.float64))
+            fc = np.asarray(fresh_res.forecast(steps=steps), dtype=np.float64)
         return {"dates": future_dates.strftime("%Y-%m-%d").tolist(), "predictions": fc.tolist()}
 
     elif model_lower == "lightgbm":

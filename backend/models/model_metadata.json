@@ -4,10 +4,10 @@
       "ARIMA": {
         "name": "ARIMA",
         "filename": "ARIMA_EURUSD.pkl",
-        "training_cutoff_date": "2026-02-27",
+        "training_cutoff_date": "2026-03-13",
         "model_type": "arima",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:05:01"
+        "last_model_update": "2026-03-16 07:49:23"
       },
       "LSTM": {
         "name": "LSTM",
@@ -15,7 +15,7 @@
         "training_cutoff_date": "2026-02-27",
         "model_type": "lstm",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:05:17"
+        "last_model_update": "2026-03-16 05:05:08"
       },
       "Prophet": {
         "name": "Prophet",
@@ -23,7 +23,7 @@
         "training_cutoff_date": "2026-02-27",
         "model_type": "prophet",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:13:16"
+        "last_model_update": "2026-03-16 08:16:40"
       },
       "SARIMA": {
         "name": "SARIMA",
@@ -31,7 +31,7 @@
         "training_cutoff_date": "2026-02-27",
         "model_type": "sarima",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:05:02"
+        "last_model_update": "2026-03-16 05:04:51"
       },
       "GRU": {
         "name": "GRU",
@@ -39,7 +39,7 @@
         "training_cutoff_date": "2026-02-27",
         "model_type": "gru",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:06:13"
+        "last_model_update": "2026-03-16 05:06:55"
       },
       "LightGBM": {
         "name": "LightGBM",
@@ -47,7 +47,7 @@
         "training_cutoff_date": "2026-02-27",
         "model_type": "lightgbm",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:13:17"
+        "last_model_update": "2026-03-16 05:07:52"
       },
       "LinearRegression": {
         "name": "LinearRegression",
@@ -55,7 +55,7 @@
         "training_cutoff_date": "2026-02-27",
         "model_type": "regression",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:13:17"
+        "last_model_update": "2026-03-16 05:07:52"
       },
       "RandomForest": {
         "name": "RandomForest",
@@ -63,17 +63,17 @@
         "training_cutoff_date": "2026-02-27",
         "model_type": "random_forest",
         "data_symbol": "EURUSD=X",
-        "last_model_update": "2026-03-16 01:13:21"
+        "last_model_update": "2026-03-16 05:07:56"
       }
     },
     "data_info": {
       "symbol": "EURUSD=X",
       "description": "EURUSD Currency Pair",
-      "training_period_start": "2020-12-10",
+      "training_period_start": "2024-05-10",
       "training_period_end": "2026-02-27",
       "prediction_valid_from": "2026-02-27"
     },
-    "last_update": "2026-03-16 01:13:21"
+    "last_update": "2026-03-16 08:16:40"
   },
   "NZDUSD": {
     "models": {
@@ -153,18 +153,18 @@
       "ARIMA": {
         "name": "ARIMA",
         "filename": "ARIMA_GCF.pkl",
-        "training_cutoff_date": "2026-02-27",
+        "training_cutoff_date": "2022-11-01",
         "model_type": "arima",
         "data_symbol": "GC=F",
-        "last_model_update": "2026-03-16 00:04:01"
+        "last_model_update": "2026-03-16 04:55:44"
       },
       "SARIMA": {
         "name": "SARIMA",
         "filename": "SARIMA_GCF.pkl",
-        "training_cutoff_date": "2026-02-09",
+        "training_cutoff_date": "2022-11-01",
         "model_type": "sarima",
         "data_symbol": "GC=F",
-        "last_model_update": "2026-03-15 16:59:47"
+        "last_model_update": "2026-03-16 04:55:45"
       },
       "LSTM": {
         "name": "LSTM",
@@ -222,6 +222,6 @@
       "training_period_end": "2026-02-27",
       "prediction_valid_from": "2026-02-27"
     },
-    "last_update": "2026-03-16 00:21:39"
+    "last_update": "2026-03-16 04:55:45"
   }
 }
