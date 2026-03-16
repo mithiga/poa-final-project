@@ -59,22 +59,15 @@ class EmbeddedResponse:
         return self._payload
 
 
-def configure_backend(default_base_url: str = "http://localhost:8000",
-                      preferred_backend_url: Optional[str] = None) -> tuple[str, str]:
+def configure_backend(default_base_url: str = "http://localhost:8000") -> tuple[str, str]:
     """Configure frontend/backend integration mode.
 
     If BACKEND_API_URL is provided, the Streamlit frontend will use that remote
     HTTP backend. Otherwise requests to the default base URL are intercepted and
     executed in-process.
     """
-    env_backend_url = os.getenv("BACKEND_API_URL", "").strip()
-    explicit_backend_url = (preferred_backend_url or "").strip()
-
-    # Priority: explicit URL from caller > environment variable > embedded mode default.
-    remote_backend_url = explicit_backend_url or env_backend_url
-    api_base_url = remote_backend_url or default_base_url
-
-    if remote_backend_url:
+    api_base_url = os.getenv("BACKEND_API_URL", "").strip() or default_base_url
+    if os.getenv("BACKEND_API_URL", "").strip():
         return api_base_url, "remote"
 
     install_requests_adapter(api_base_url)
