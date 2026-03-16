@@ -226,5 +226,33 @@
       "prediction_valid_from": "2026-03-13"
     },
     "last_update": "2026-03-16 11:29:24"
+  },
+  "USDJPY": {
+    "models": {
+      "Prophet": {
+        "name": "Prophet",
+        "filename": "PROPHET_USDJPY.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "prophet",
+        "data_symbol": "USDJPY=X",
+        "last_model_update": "2026-03-16 15:43:05"
+      },
+      "LSTM": {
+        "name": "LSTM",
+        "filename": "LSTM_USDJPY_data.pkl",
+        "training_cutoff_date": "2026-02-27",
+        "model_type": "lstm",
+        "data_symbol": "USDJPY=X",
+        "last_model_update": "2026-03-16 15:44:35"
+      }
+    },
+    "data_info": {
+      "symbol": "USDJPY=X",
+      "description": "USDJPY Currency Pair",
+      "training_period_start": "2024-05-27",
+      "training_period_end": "2026-02-27",
+      "prediction_valid_from": "2026-02-27"
+    },
+    "last_update": "2026-03-16 15:44:35"
   }
 }
