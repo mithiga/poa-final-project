@@ -3,6 +3,9 @@ Service layer — bridges the API endpoints and the ML pipeline.
 """
 
 import os
+import threading
+import uuid
+from datetime import datetime
 from typing import Dict, Optional, List, Any
 
 import pandas as pd
@@ -55,6 +58,133 @@ class ForecastService:
 
 class TrainingService:
     """Handles model training requests."""
+
+    _train_all_jobs: Dict[str, Dict[str, Any]] = {}
+    _train_all_jobs_lock = threading.Lock()
+
+    @staticmethod
+    def _train_all_model_count() -> int:
+        # `SARIMA` is an alias of `SARIMAX` in MODEL_TRAINERS and is skipped in train_all_models.
+        return len([name for name in MODEL_TRAINERS.keys() if name != "SARIMA"])
+
+    @staticmethod
+    def _run_train_all_job(
+        job_id: str,
+        ticker: str,
+        start_date: str,
+        end_date: str,
+        train_size: float,
+        force_retrain: bool,
+    ) -> None:
+        try:
+            with TrainingService._train_all_jobs_lock:
+                job = TrainingService._train_all_jobs.get(job_id)
+                if not job:
+                    return
+                if job.get("cancel_requested"):
+                    job["status"] = "canceled"
+                    job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+                    return
+                job["status"] = "running"
+                job["current_ticker"] = ticker
+
+            result = TrainingService.train_all(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                train_size=train_size,
+                force_retrain=force_retrain,
+            )
+
+            with TrainingService._train_all_jobs_lock:
+                job = TrainingService._train_all_jobs.get(job_id)
+                if not job:
+                    return
+                if job.get("cancel_requested") and job.get("status") != "completed":
+                    job["status"] = "canceled"
+                    job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+                    return
+
+                job["status"] = "completed"
+                job["result"] = result
+                job["completed_units"] = int(job.get("total_units", 0))
+                job["current_ticker"] = None
+                job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        except Exception as exc:
+            with TrainingService._train_all_jobs_lock:
+                job = TrainingService._train_all_jobs.get(job_id)
+                if not job:
+                    return
+                job["status"] = "failed"
+                job["error"] = str(exc)
+                job["current_ticker"] = None
+                job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+
+    @staticmethod
+    def start_train_all_job(
+        ticker: str,
+        start_date: str,
+        end_date: str,
+        train_size: float = 0.8,
+        force_retrain: bool = False,
+    ) -> Dict[str, Any]:
+        """Start Train All in a background thread and return a job descriptor."""
+        job_id = str(uuid.uuid4())
+        total_models = TrainingService._train_all_model_count()
+
+        job_state = {
+            "job_id": job_id,
+            "status": "queued",
+            "ticker": ticker,
+            "start_date": start_date,
+            "end_date": end_date,
+            "train_size": float(train_size),
+            "force_retrain": bool(force_retrain),
+            "total_tickers": 1,
+            "total_models": total_models,
+            "total_units": total_models,
+            "completed_units": 0,
+            "current_ticker": None,
+            "cancel_requested": False,
+            "result": None,
+            "error": None,
+            "started_at": datetime.utcnow().isoformat() + "Z",
+            "finished_at": None,
+        }
+
+        with TrainingService._train_all_jobs_lock:
+            TrainingService._train_all_jobs[job_id] = job_state
+
+        thread = threading.Thread(
+            target=TrainingService._run_train_all_job,
+            args=(job_id, ticker, start_date, end_date, train_size, force_retrain),
+            daemon=True,
+        )
+        thread.start()
+
+        return {"job_id": job_id, "status": "queued"}
+
+    @staticmethod
+    def get_train_all_job(job_id: str) -> Optional[Dict[str, Any]]:
+        """Return the current state of a Train All async job."""
+        with TrainingService._train_all_jobs_lock:
+            job = TrainingService._train_all_jobs.get(job_id)
+            if not job:
+                return None
+            return dict(job)
+
+    @staticmethod
+    def cancel_train_all_job(job_id: str) -> Optional[Dict[str, Any]]:
+        """Request cancellation of a Train All async job."""
+        with TrainingService._train_all_jobs_lock:
+            job = TrainingService._train_all_jobs.get(job_id)
+            if not job:
+                return None
+            job["cancel_requested"] = True
+            if job.get("status") == "queued":
+                job["status"] = "canceled"
+                job["finished_at"] = datetime.utcnow().isoformat() + "Z"
+            return dict(job)
 
     @staticmethod
     def train_single(ticker: str, model: str, start_date: str,
