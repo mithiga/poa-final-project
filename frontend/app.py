@@ -2,6 +2,8 @@
 ForexAI Pro - Minimal frontend shell with sidebar navigation and page routing.
 """
 
+import os
+
 import requests
 import streamlit as st
 
@@ -10,7 +12,34 @@ from utils.runtime_cache import runtime_safe_cache_data
 from utils.theme import THEMES, get_navbar_toggle_html, get_theme_css
 
 
-API_BASE_URL, BACKEND_MODE = configure_backend()
+def _resolve_backend_api_url_from_secrets() -> str:
+    """Resolve external backend URL from Streamlit secrets or environment."""
+    # 1) Flat key in secrets.toml: BACKEND_API_URL="https://..."
+    try:
+        flat = st.secrets.get("BACKEND_API_URL", "")
+        if isinstance(flat, str) and flat.strip():
+            return flat.strip()
+    except Exception:
+        pass
+
+    # 2) Nested key in secrets.toml:
+    # [backend]
+    # api_url = "https://..."
+    try:
+        backend_section = st.secrets.get("backend", {})
+        if isinstance(backend_section, dict):
+            nested = str(backend_section.get("api_url", "")).strip()
+            if nested:
+                return nested
+    except Exception:
+        pass
+
+    # 3) Environment fallback.
+    return os.getenv("BACKEND_API_URL", "").strip()
+
+
+EXTERNAL_BACKEND_URL = _resolve_backend_api_url_from_secrets()
+API_BASE_URL, BACKEND_MODE = configure_backend(preferred_backend_url=EXTERNAL_BACKEND_URL)
 
 st.set_page_config(layout="wide", page_title="ForexAI Pro", page_icon="📈")
 

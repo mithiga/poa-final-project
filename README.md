@@ -11,7 +11,49 @@ The project is prepared for Streamlit Community Cloud as a single deployed app:
 - Dependencies: root `requirements.txt`
 - Backend mode on Streamlit Cloud: embedded inside the Streamlit process
 
-If you want the frontend to call an external backend instead, set the `BACKEND_API_URL` environment variable in Streamlit Cloud.
+If you want the frontend to call an external backend instead, set BACKEND_API_URL in Streamlit Cloud secrets or environment variables.
+
+### Expose FastAPI in deployment (recommended)
+
+To access public FastAPI endpoints in production, deploy the backend as a separate web service and point Streamlit to it.
+
+1. Deploy backend service
+
+- Working directory: backend
+- Start command:
+
+```powershell
+uvicorn apis.main:app --host 0.0.0.0 --port $PORT
+```
+
+2. Confirm backend is reachable
+
+- Open: https://your-backend-domain/docs
+- Test: https://your-backend-domain/status
+
+3. Configure Streamlit frontend to use remote backend
+
+Option A: Streamlit secrets (preferred)
+
+```toml
+BACKEND_API_URL = "https://your-backend-domain"
+```
+
+Option B: nested secret format
+
+```toml
+[backend]
+api_url = "https://your-backend-domain"
+```
+
+Option C: environment variable
+
+- Key: BACKEND_API_URL
+- Value: https://your-backend-domain
+
+4. Redeploy/restart Streamlit app
+
+After restart, sidebar should show Backend mode: remote.
 
 ## Local run
 
@@ -51,6 +93,8 @@ git push -u origin main
 - Repository: your GitHub repository
 - Branch: `main`
 - Main file path: `streamlit_app.py`
+
+If using a separate backend service, set BACKEND_API_URL in Streamlit app Settings -> Secrets (or Environment Variables).
 
 ## Notes
 
